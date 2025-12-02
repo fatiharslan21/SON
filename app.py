@@ -209,18 +209,21 @@ if st.session_state['df_sonuc'] is not None:
     son_tarih=df["TarihObj"].max()
     df_son=df[df["TarihObj"]==son_tarih]
     cols=st.columns(len(df_son))
-    for i,(idx,row) in enumerate(df_son.iterrows()):
-        with cols[i%len(cols)]:
-            df_prev=df[df["TarihObj"]<son_tarih]
-            prev_val=0
+    for i, (idx, row) in enumerate(df_son.head(4).iterrows()):
+        with cols[i % 4]:
+            prev_val = 0
+            df_prev = df[df["TarihObj"] < son_tarih]
             if not df_prev.empty:
-                prev_rows=df_prev[(df_prev["Kalem"]==row["Kalem"]) & (df_prev["Taraf"]==row["Taraf"])]
-                if not prev_rows.empty: prev_val=prev_rows.iloc[-1]["Değer"]
-            delta_val=row["Değer"]-prev_val
-            delta_pct=(delta_val/prev_val*100) if prev_val!=0 else 0
-            val_fmt=f"{row['Değer']:,.0f}".replace(",",".")
+                prev_rows = df_prev[(df_prev["Kalem"] == row["Kalem"]) & (df_prev["Taraf"] == row["Taraf"])]
+                if not prev_rows.empty:
+                    prev_val = prev_rows.iloc[-1]["Değer"]
+            delta_val = row["Değer"] - prev_val
+            delta_pct = (delta_val / prev_val * 100) if prev_val != 0 else 0
+            val_fmt = f"{row['Değer']:,.0f}".replace(",", ".")
 
-            st.metric(label=f"{row['Taraf']}",value=f"{val_fmt}",delta=f"%{delta_pct:.1f}",key=f"kpi_{row['Taraf']}_{row['Kalem']}")
+            # Key'i saflaştır ve index ekle
+            safe_key = f"kpi_{i}_{''.join(c for c in row['Taraf'] if c.isalnum())}_{''.join(c for c in row['Kalem'] if c.isalnum())}"
+            st.metric(label=f"{row['Taraf']}", value=f"{val_fmt}", delta=f"%{delta_pct:.1f}", key=safe_key)
 
     # --- TABLAR ---
     tab1,tab2,tab3,tab4=st.tabs(["📉 Trend Analizi","🧪 Senaryo Simülasyonu","📊 Pazar Payı","📑 Detaylı Tablo"])
