@@ -221,41 +221,17 @@ def get_driver():
 
 # --- 4. VERİ ÇEKME MOTORU (GÜNCELLENDİ) ---
 # --- 4. VERİ ÇEKME MOTORU (KESİN ÇÖZÜM) ---
+# --- 4. VERİ ÇEKME MOTORU (STALENESS CHECK - KESİN ÇÖZÜM) ---
 def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
     driver = None
     data = []
 
-    # Yardımcı Fonksiyon: Güvenli Seçim
-    def safe_select(driver, element_id, visible_text):
+    # Yardımcı Fonksiyon: Bir elementin DOM'dan silinmesini bekle (Eski veriyi okumamak için şart)
+    def wait_for_refresh(driver, old_element):
         try:
-            # Dropdown'ı görünür yap
-            driver.execute_script(f"document.getElementById('{element_id}').style.display = 'block';")
-
-            select_element = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, element_id))
-            )
-            sel = Select(select_element)
-
-            # Zaten seçiliyse işlem yapma ama yine de bekle (sayfa oturması için)
-            if sel.first_selected_option.text.strip() == visible_text.strip():
-                time.sleep(1)
-                return
-
-            # Seçimi yap
-            sel.select_by_visible_text(visible_text)
-
-            # SEÇİM SONRASI BEKLEME (BDDK İçin Kritik)
-            time.sleep(3)
-
-        except Exception as e:
-            # Hata durumunda tekrar dene
-            time.sleep(2)
-            try:
-                driver.execute_script(f"document.getElementById('{element_id}').style.display = 'block';")
-                Select(driver.find_element(By.ID, element_id)).select_by_visible_text(visible_text)
-                time.sleep(3)
-            except:
-                pass
+            WebDriverWait(driver, 10).until(EC.staleness_of(old_element))
+        except:
+            pass  # Zaten silinmişse veya timeout yerse devam et
 
     try:
         driver = get_driver()
@@ -282,68 +258,96 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                 status_container.info(f"⏳ İşleniyor: **{donem}**")
 
                 try:
-                    # 1. YIL SEÇİMİ
-                    safe_select(driver, "ddlYil", str(yil))
+                    # 1. YIL SEÇ (Garanti olsun diye her seferinde)
+                    driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
+                    Select(driver.find_element(By.ID, "ddlYil")).select_by_visible_text(str(yil))
+                    time.sleep(1)  # Yıl seçimi sonrası kısa bekleme
 
-                    # 2. AY SEÇİMİ
-                    safe_select(driver, "ddlAy", ay_str)
+                    # 2. AY SEÇ
+                    driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
+                    ay_select = Select(driver.find_element(By.ID, "ddlAy"))
 
-                    # 3. TARAF DÖNGÜSÜ
+                    # Eğer ay zaten seçiliyse tekrar seçip sayfayı yorma
+                    if ay_select.first_selected_option.text != ay_str:
+                        ay_select.select_by_visible_text(ay_str)
+                        time.sleep(2.5)  # Ay değişimi reload yapar
+
+                    # 3. TARAF DÖNGÜSÜ (SORUNUN ÇÖZÜLDÜĞÜ YER)
                     for taraf in secilen_taraflar:
                         try:
-                            # Taraf seçiminden önce HTML elementini tazeleyelim
+                            # --- ADIM A: ESKİ TABLOYU İŞARETLE ---
+                            # Sayfada herhangi bir veri satırı buluyoruz.
+                            # Taraf değiştiğinde bu satırın hafızadan silinmesi lazım.
+                            eski_tablo_elem = None
+                            try:
+                                eski_tablo_elem = driver.find_element(By.TAG_NAME, "tr")
+                            except:
+                                pass
+
+                            # --- ADIM B: TARAFI SEÇ ---
                             driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
                             taraf_select = Select(driver.find_element(By.ID, "ddlTaraf"))
 
-                            secilecek_metin = None
+                            secilecek_opt_text = None
                             for opt in taraf_select.options:
                                 if taraf in opt.text:
-                                    secilecek_metin = opt.text
+                                    secilecek_opt_text = opt.text
                                     break
 
-                            if secilecek_metin:
-                                # Tarafı seçiyoruz
-                                taraf_select.select_by_visible_text(secilecek_metin)
+                            if secilecek_opt_text:
+                                # Mevcut seçim zaten istediğimizse pas geçme, REFRESH tetiklemek gerekebilir
+                                # Ama BDDK'da aynı seçeneği seçince refresh olmaz.
+                                if taraf_select.first_selected_option.text != secilecek_opt_text:
+                                    taraf_select.select_by_visible_text(secilecek_opt_text)
 
-                                # --- KRİTİK NOKTA BURASI ---
-                                # Taraf değiştikten sonra tablonun güncellenmesi için
-                                # mutlaka beklemeliyiz. BDDK bazen 3-4 saniye bekletiyor.
-                                time.sleep(4)
+                                    # --- ADIM C: ESKİ TABLONUN ÖLMESİNİ BEKLE (STALENESS) ---
+                                    # İşte burası verinin karışmasını önleyen kilit nokta.
+                                    # Kod burada "Eski tablo yok olana kadar bekle" diyor.
+                                    if eski_tablo_elem:
+                                        wait_for_refresh(driver, eski_tablo_elem)
 
-                                # Sayfanın tamamen yüklendiğinden emin olmak için body'ye tıklama simülasyonu (Focus kaybı için)
-                                driver.find_element(By.TAG_NAME, 'body').click()
+                                    # Ekstra güvenlik beklemesi (Yeni tablo render'ı için)
+                                    time.sleep(2)
                             else:
                                 continue
 
-                            # 4. HTML'İ SIFIRDAN OKU (Eski veriyi ezmek için şart)
+                            # --- ADIM D: VERİYİ ÇEK ---
+                            # Taze HTML'i al
                             soup = BeautifulSoup(driver.page_source, 'html.parser')
 
                             for veri in secilen_veriler:
                                 conf = VERI_KONFIGURASYONU[veri]
 
-                                # Sekme değişimi gerekiyorsa yap
+                                # Sekme tıklama işlemi
                                 try:
-                                    driver.execute_script(
-                                        f"if(document.getElementById('{conf['tab']}')) document.getElementById('{conf['tab']}').click();")
-                                    time.sleep(1)  # Sekme animasyonu beklemesi
-                                    # Sekme değişince HTML yine değişir, tekrar oku
-                                    soup = BeautifulSoup(driver.page_source, 'html.parser')
+                                    # Eğer sekme butonu varsa tıkla
+                                    tab_btn = driver.find_elements(By.ID, conf['tab'])
+                                    if tab_btn:
+                                        # Tıklamadan önce mevcut tablonun referansını al
+                                        eski_tab_elem = driver.find_element(By.TAG_NAME, "tr")
+
+                                        driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
+
+                                        # Sekme tıklanınca da tablo değişir, yine bekle
+                                        wait_for_refresh(driver, eski_tab_elem)
+                                        time.sleep(1)
+
+                                        # HTML'i güncelle
+                                        soup = BeautifulSoup(driver.page_source, 'html.parser')
                                 except:
                                     pass
 
+                                # Tabloyu Tara
                                 target_rows = soup.find_all("tr")
                                 found_val = None
 
                                 for row in target_rows:
-                                    row_text = row.get_text()
-                                    if conf['row_text'] in row_text:
+                                    if conf['row_text'] in row.get_text():
                                         cols = row.find_all("td")
                                         for col in cols:
                                             cell_attrs = str(col.attrs)
                                             if conf['col_id'] in cell_attrs:
-                                                # Boşluk ve format temizliği
                                                 raw_text = col.get_text().strip()
-                                                # Eğer veri boşsa veya '-' ise 0 yap
                                                 if not raw_text or raw_text == '-':
                                                     found_val = 0.0
                                                 else:
@@ -363,21 +367,21 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                         "Değer": found_val,
                                         "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
                                     })
-                                    # Veriyi bulduktan sonra loga yaz (kontrol için)
-                                    print(f"✅ Çekildi: {donem} - {taraf} - {veri}: {found_val}")
+                                    # Debug için konsola basar (Terminalde görebilirsin)
+                                    print(f"✅ {donem} | {taraf} | {veri} -> {found_val}")
 
                         except Exception as e:
-                            print(f"Taraf içi hata ({taraf}): {e}")
+                            print(f"Hata ({taraf}): {e}")
                             continue
 
                 except Exception as step_e:
-                    st.error(f"Döngü Hatası ({donem}): {step_e}")
+                    st.error(f"Döngü Hatası: {step_e}")
 
                 current_step += 1
                 progress_bar.progress(min(current_step / max(1, total_steps), 1.0))
 
     except Exception as e:
-        st.error(f"Ana Sürücü Hatası: {e}")
+        st.error(f"Sistem Hatası: {e}")
     finally:
         if driver: driver.quit()
 
