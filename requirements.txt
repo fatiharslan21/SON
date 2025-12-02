@@ -6,3 +6,4 @@ beautifulsoup4
 plotly
 xlsxwriter
 openpyxl
+openai

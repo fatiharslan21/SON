@@ -11,6 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
+from openai import OpenAI
 import plotly.express as px
 import plotly.graph_objects as go
 import time
@@ -18,7 +19,7 @@ import sys
 import io
 
 # --- 1. AYARLAR VE TASARIM ---
-st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
+st.set_page_config(page_title="BDDK Veri Analizi", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -249,7 +250,7 @@ with st.sidebar:
     st.markdown("### 🚀 İŞLEM MERKEZİ")
     btn = st.button("ANALİZİ BAŞLAT", key="sb_btn_baslat")
 
-st.title("🏦 BDDK Finansal Analiz Pro")
+st.title("🏦 BDDK Analiz Paneli")
 
 if 'df_sonuc' not in st.session_state:
     st.session_state['df_sonuc'] = None
@@ -307,8 +308,8 @@ if st.session_state['df_sonuc'] is not None:
         st.error(f"Metrik hatası: {e}")
 
     st.markdown("---")
-    tab1, tab2, tab3 = st.tabs(["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📑 Detaylı Tablo"])
-
+    # Mevcut satırı bulun ve şununla değiştirin:
+    tab1, tab2, tab3, tab4 = st.tabs(["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📑 Detaylı Tablo", "🤖 AI Yorumu"])
     with tab1:
         kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique(), key="trend_select")
         df_chart = df[df["Kalem"] == kalem_sec].copy()
@@ -363,6 +364,126 @@ if st.session_state['df_sonuc'] is not None:
             lambda x: "{:,.0f}".format(x).replace(",", "."))
 
         st.dataframe(df_formatted_display, use_container_width=True)
+        with tab4:
+            st.markdown("#### 🤖 Yapay Zeka Destekli Finansal Yorum")
+            st.info("Verileri analiz etmek için OpenAI (ChatGPT) API anahtarınızı giriniz. Anahtarınız kaydedilmez.")
+
+            # API Key Giriş Alanı
+            api_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
+
+            if api_key:
+                # Analiz Butonu
+                if st.button("🚀 Verileri Yorumla"):
+                    try:
+                        client = OpenAI(api_key=api_key)
+
+                        with st.spinner("Yapay zeka verileri inceliyor, finansal çıkarımlar yapıyor..."):
+                            # --- 1. Veriyi Hazırla (Token tasarrufu için özetliyoruz) ---
+                            # Sadece son 3 dönemi ve önemli değişimleri alalım
+                            df_ai = df.sort_values("TarihObj", ascending=True)
+                            son_donemler = df_ai["Dönem"].unique()[-3:]  # Son 3 dönem
+                            df_ai_ozet = df_ai[df_ai["Dönem"].isin(son_donemler)]
+
+                            # Veriyi metne çevir
+                            csv_data = df_ai_ozet[["Dönem", "Taraf", "Kalem", "Değer"]].to_csv(index=False)
+
+                            # --- 2. Prompt (Komut) Hazırla ---
+                            prompt = f"""
+                            Sen uzman bir bankacılık ve finans analistisin. 
+                            Aşağıdaki CSV formatındaki verileri analiz et.
+
+                            Veriler:
+                            {csv_data}
+
+                            Lütfen şunları yap:
+                            1. Verilerdeki ana trendi belirle (Artış/Azalış).
+                            2. Taraf bazında (Sektör vs Kamu vs Özel) dikkat çeken bir ayrışma varsa belirt.
+                            3. Bu veriler bankacılık sektörü için bir risk mi yoksa fırsat mı oluşturuyor?
+                            4. Finansal okuryazarlığı olan bir yöneticiye sunulacak profesyonel bir dille, Türkçe özetle.
+                            5. Sayısal verileri kullanırken binlik ayrımlarına dikkat et.
+                            """
+
+                            # --- 3. API'ye Gönder ---
+                            response = client.chat.completions.create(
+                                model="gpt-4o",  # Veya gpt-3.5-turbo
+                                messages=[
+                                    {"role": "system", "content": "Sen kıdemli bir finansal danışmansın."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.7
+                            )
+
+                            ai_reply = response.choices[0].message.content
+
+                        # --- 4. Sonucu Yazdır ---
+                        st.success("Analiz Tamamlandı!")
+                        st.markdown("---")
+                        st.markdown(ai_reply)
+
+                    except Exception as e:
+                        st.error(f"Hata oluştu: {e}. Lütfen API anahtarınızı ve bakiyenizi kontrol edin.")
+            else:
+                st.warning("Lütfen başlamak için API anahtarınızı girin.")
+        with tab4:
+            st.markdown("#### 🤖 Yapay Zeka Destekli Finansal Yorum")
+            st.info("Verileri analiz etmek için OpenAI (ChatGPT) API anahtarınızı giriniz. Anahtarınız kaydedilmez.")
+
+            # API Key Giriş Alanı
+            api_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
+
+            if api_key:
+                # Analiz Butonu
+                if st.button("🚀 Verileri Yorumla"):
+                    try:
+                        client = OpenAI(api_key=api_key)
+
+                        with st.spinner("Yapay zeka verileri inceliyor, finansal çıkarımlar yapıyor..."):
+                            # --- 1. Veriyi Hazırla (Token tasarrufu için özetliyoruz) ---
+                            # Sadece son 3 dönemi ve önemli değişimleri alalım
+                            df_ai = df.sort_values("TarihObj", ascending=True)
+                            son_donemler = df_ai["Dönem"].unique()[-3:]  # Son 3 dönem
+                            df_ai_ozet = df_ai[df_ai["Dönem"].isin(son_donemler)]
+
+                            # Veriyi metne çevir
+                            csv_data = df_ai_ozet[["Dönem", "Taraf", "Kalem", "Değer"]].to_csv(index=False)
+
+                            # --- 2. Prompt (Komut) Hazırla ---
+                            prompt = f"""
+                            Sen uzman bir bankacılık ve finans analistisin. 
+                            Aşağıdaki CSV formatındaki verileri analiz et.
+
+                            Veriler:
+                            {csv_data}
+
+                            Lütfen şunları yap:
+                            1. Verilerdeki ana trendi belirle (Artış/Azalış).
+                            2. Taraf bazında (Sektör vs Kamu vs Özel) dikkat çeken bir ayrışma varsa belirt.
+                            3. Bu veriler bankacılık sektörü için bir risk mi yoksa fırsat mı oluşturuyor?
+                            4. Finansal okuryazarlığı olan bir yöneticiye sunulacak profesyonel bir dille, Türkçe özetle.
+                            5. Sayısal verileri kullanırken binlik ayrımlarına dikkat et.
+                            """
+
+                            # --- 3. API'ye Gönder ---
+                            response = client.chat.completions.create(
+                                model="gpt-4o",  # Veya gpt-3.5-turbo
+                                messages=[
+                                    {"role": "system", "content": "Sen kıdemli bir finansal danışmansın."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.7
+                            )
+
+                            ai_reply = response.choices[0].message.content
+
+                        # --- 4. Sonucu Yazdır ---
+                        st.success("Analiz Tamamlandı!")
+                        st.markdown("---")
+                        st.markdown(ai_reply)
+
+                    except Exception as e:
+                        st.error(f"Hata oluştu: {e}. Lütfen API anahtarınızı ve bakiyenizi kontrol edin.")
+            else:
+                st.warning("Lütfen başlamak için API anahtarınızı girin.")
 
         # --- EXCEL ÇIKTISI ---
         df_for_excel = df.copy().sort_values(["TarihObj", "Kalem", "Taraf"])
