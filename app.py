@@ -15,7 +15,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import time
 import sys
-import io  # Excel işlemi için gerekli
+import io
 
 # --- 1. AYARLAR VE TASARIM ---
 st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦")
@@ -62,13 +62,10 @@ VERI_KONFIGURASYONU = {
 
 # --- 3. DRIVER YÖNETİMİ ---
 def get_driver():
-    # Platform bağımsız driver ayarları
     if sys.platform == "linux":
         options = FirefoxOptions()
         options.add_argument("--headless")
         options.add_argument("--disable-gpu")
-        # Linux üzerinde genelde binary yolu belirtmek gerekebilir
-        # options.binary_location = "/usr/bin/firefox"
         try:
             service = FirefoxService(GeckoDriverManager().install())
             return webdriver.Firefox(service=service, options=options)
@@ -77,8 +74,7 @@ def get_driver():
             return None
     else:
         options = ChromeOptions()
-        # Daha stabil bir çalışma için aşağıdaki argümanlar eklendi
-        options.add_argument("--headless=new")  # Arka planda çalıştır (pencere açmaz)
+        options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
@@ -105,7 +101,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
         status_container.info("🌐 BDDK sistemine bağlanılıyor...")
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
-        # Sayfa yüklenmesini bekle
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
         time.sleep(2)
 
@@ -125,7 +120,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                 status_container.info(f"⏳ İşleniyor: **{donem}**")
 
                 try:
-                    # Yıl Seçimi
                     driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
                     sel_yil = Select(driver.find_element(By.ID, "ddlYil"))
                     sel_yil.select_by_visible_text(str(yil))
@@ -133,7 +127,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                           driver.find_element(By.ID, "ddlYil"))
                     time.sleep(1.5)
 
-                    # Ay Seçimi
                     driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
                     sel_ay_elem = driver.find_element(By.ID, "ddlAy")
                     sel_ay = Select(sel_ay_elem)
@@ -142,7 +135,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                     time.sleep(2)
 
                     for taraf in secilen_taraflar:
-                        # Taraf Seçimi
                         driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
                         taraf_elem = driver.find_element(By.ID, "ddlTaraf")
                         select_taraf = Select(taraf_elem)
@@ -163,8 +155,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                             conf = VERI_KONFIGURASYONU[veri]
 
                             try:
-                                # Sekme (Tab) Tıklama
-                                # Tıklanabilir olana kadar bekle
                                 WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, conf['tab'])))
                                 driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
                                 time.sleep(1.5)
@@ -173,7 +163,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                 pass
 
                             current_group = None
-                            # Tablo Satırlarını Gez
                             for row in soup.find_all("tr"):
                                 group_cell = row.find("td", colspan=True)
                                 if group_cell:
@@ -188,10 +177,7 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                 toplam = row.find("td", {"aria-describedby": conf['col_id']})
 
                                 if ad and toplam:
-                                    # Eğer grup bulunamadıysa varsayılan olarak seçileni al (Bazı tablolarda header farklı olabilir)
                                     row_taraf = current_group if current_group else taraf
-
-                                    # Satır metni bizim aradığımız kalem mi?
                                     if conf['row_text'] in ad.get_text(strip=True):
                                         raw_text = toplam.get_text(strip=True)
                                         clean_text = raw_text.replace('.', '').replace(',', '.')
@@ -203,12 +189,11 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                         data.append({
                                             "Dönem": donem,
                                             "Taraf": row_taraf,
-                                            "Kalem": veri,  # Kullanıcıya görünen ad
+                                            "Kalem": veri,
                                             "Değer": found_val,
                                             "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
                                         })
                 except Exception as e:
-                    # Tekil hatalar tüm döngüyü kırmasın
                     print(f"Hata ({donem}): {e}")
                     pass
 
@@ -263,7 +248,6 @@ if btn:
 # --- DASHBOARD ---
 if st.session_state['df_sonuc'] is not None:
     df = st.session_state['df_sonuc']
-    # Veriyi tarih objesine göre sırala (Grafikler için kritik)
     df = df.sort_values("TarihObj")
 
     st.subheader("📊 Özet Performans (Son Dönem)")
@@ -271,12 +255,10 @@ if st.session_state['df_sonuc'] is not None:
         son_tarih = df["TarihObj"].max()
         df_son = df[df["TarihObj"] == son_tarih]
 
-        # Sütunları dinamik oluştur
         cols = st.columns(4)
-        for i, (idx, row) in enumerate(df_son.head(8).iterrows()):  # İlk 8 veriyi göster
+        for i, (idx, row) in enumerate(df_son.head(8).iterrows()):
             with cols[i % 4]:
                 prev_val = 0
-                # Bir önceki ayı bul
                 df_prev = df[
                     (df["TarihObj"] < son_tarih) & (df["Kalem"] == row["Kalem"]) & (df["Taraf"] == row["Taraf"])]
                 if not df_prev.empty:
@@ -297,13 +279,12 @@ if st.session_state['df_sonuc'] is not None:
     with tab1:
         kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
         df_chart = df[df["Kalem"] == kalem_sec].copy()
-        df_chart = df_chart.sort_values("TarihObj")  # Garanti sıralama
+        df_chart = df_chart.sort_values("TarihObj")
 
         fig = px.line(df_chart, x="Dönem", y="Değer", color="Taraf", title=f"📅 {kalem_sec} Trendi",
                       markers=True,
                       color_discrete_sequence=["#FCB131", "#000000", "#555555"])
 
-        # X Ekseninin tarih sırasına göre gelmesi için (Dönem string olsa bile)
         fig.update_xaxes(categoryorder='array', categoryarray=df_chart["Dönem"].unique())
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="x unified")
         fig.update_yaxes(tickformat=",")
@@ -348,12 +329,13 @@ if st.session_state['df_sonuc'] is not None:
                     cols_g = st.columns(len(other_rows))
                     for idx, (i, r) in enumerate(other_rows.iterrows()):
                         share_pct = (r["Değer"] / sektor_val) * 100 if sektor_val > 0 else 0
-                        with cols_g[idx % 3]:  # 3 sütuna sığdır
+                        with cols_g[idx % 3]:
                             fig_g = go.Figure(
                                 go.Indicator(mode="gauge+number", value=share_pct, title={'text': f"{r['Taraf']} Payı"},
                                              gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#FCB131"}}))
                             fig_g.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
-                            st.plotly_chart(fig_g, use_container_width=True)
+                            # --- DÜZELTME BURADA YAPILDI: key=f"gauge_{idx}" EKLENDİ ---
+                            st.plotly_chart(fig_g, use_container_width=True, key=f"gauge_{idx}")
                 else:
                     st.info("Sektör dışında karşılaştırılacak taraf seçmediniz.")
             else:
@@ -370,7 +352,6 @@ if st.session_state['df_sonuc'] is not None:
         df_display = df.sort_values(["TarihObj", "Taraf", "Kalem"])
         st.dataframe(df_display, use_container_width=True)
 
-        # --- EXCEL INDIRME DUZELTMESI ---
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             df_display.to_excel(writer, index=False, sheet_name='BDDK_Veri')
