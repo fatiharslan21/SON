@@ -88,12 +88,12 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
 
     try:
         driver = get_driver()
-        status_container.info("🌐 BDDK Sayfası Yükleniyor (Biraz sürebilir)...")
+        status_container.info("🌐 BDDK Sayfası Yükleniyor...")
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
         # Sayfanın ilk yüklenişi için uzun bekleme
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
-        time.sleep(3)  # Ekstra garanti
+        WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.ID, "ddlYil")))
+        time.sleep(5)
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
@@ -112,12 +112,13 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                 status_container.info(f"⏳ İşleniyor: **{donem}**")
 
                 # 1. TARİH SEÇİMİ (Güvenli JS)
+                # jQuery trigger'larını çiftliyoruz ki kesin algılasın
                 driver.execute_script(f"""
                     $('#ddlYil').val('{yil}').trigger('chosen:updated').trigger('change');
-                    $('#ddlAy').val('{ay_str}').trigger('chosen:updated').trigger('change');
+                    setTimeout(function() {{ $('#ddlAy').val('{ay_str}').trigger('chosen:updated').trigger('change'); }}, 500);
                 """)
-                # Tarih değişimi sonrası tablonun güncellenmesi için bekleme (ARTIRILDI)
-                time.sleep(4.0)
+                # Tarih değişimi sonrası tablonun güncellenmesi için bekleme
+                time.sleep(5.0)
 
                 for taraf in secilen_taraflar:
                     # 2. TARAF SEÇİMİ
@@ -131,41 +132,43 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                         }}
                         $(t).trigger('chosen:updated').trigger('change');
                     """)
-                    time.sleep(2.0)  # Taraf değişimi bekleme
+                    time.sleep(2.0)
 
                     for veri in secilen_veriler:
                         conf = VERI_KONFIGURASYONU[veri]
-                        try:
-                            # 3. SEKME TIKLAMA
-                            # Elementin tıklanabilir olmasını bekle
-                            driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                            time.sleep(1.0)  # Sekme geçiş süresi
 
-                            # 4. VERİ OKUMA (XPath ile)
-                            # Satır metnini içeren (tr) ve içinde target ID olan hücreyi (td) bul
-                            xpath = f"//tr[contains(., '{conf['row_text']}')]//td[contains(@aria-describedby, '{conf['col_id']}')]"
+                        # --- RETRY (TEKRAR DENEME) MEKANİZMASI ---
+                        # Veriyi bulamazsa 3 kere daha dener.
+                        success = False
+                        attempt = 0
+                        while not success and attempt < 3:
+                            try:
+                                # Sekmeye Tıkla
+                                driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
+                                time.sleep(1.0)
 
-                            # Bekle ve Bul
-                            element = WebDriverWait(driver, 5).until(
-                                EC.presence_of_element_located((By.XPATH, xpath))
-                            )
-
-                            val_text = element.text.strip()
-
-                            # Veri boşsa tekrar dene
-                            if not val_text:
-                                time.sleep(1)
+                                # XPath ile veriyi ara
+                                xpath = f"//tr[contains(., '{conf['row_text']}')]//td[contains(@aria-describedby, '{conf['col_id']}')]"
+                                element = driver.find_element(By.XPATH, xpath)
                                 val_text = element.text.strip()
 
-                            val_num = float(val_text.replace('.', '').replace(',', '.')) if val_text else 0.0
+                                if val_text:
+                                    val_num = float(val_text.replace('.', '').replace(',', '.'))
+                                    master_data.append({
+                                        "Dönem": donem, "Taraf": taraf,
+                                        "Kalem": veri, "Değer": val_num
+                                    })
+                                    success = True  # Başardık, döngüden çık
+                                else:
+                                    raise Exception("Boş veri")
 
-                            master_data.append({
-                                "Dönem": donem, "Taraf": taraf,
-                                "Kalem": veri, "Değer": val_num
-                            })
-                        except Exception as inner_e:
-                            # Bu kalem bulunamadıysa devam et
-                            pass
+                            except:
+                                # Başarısız olursa bekle ve tekrar dene
+                                time.sleep(2)
+                                attempt += 1
+
+                        if not success:
+                            print(f"UYARI: {donem} - {taraf} - {veri} bulunamadı.")
 
                 current_step += 1
                 progress_bar.progress(current_step / max(1, total_steps))
@@ -173,11 +176,10 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
         return pd.DataFrame(master_data)
 
     except Exception as e:
-        st.error(f"❌ BEKLENMEYEN HATA: {e}")
-        # Hata anında görüntü al (Debug için)
+        st.error(f"❌ HATA: {e}")
         if driver:
             driver.save_screenshot("final_error.png")
-            st.image("final_error.png", caption="Hata Anında Sunucu")
+            st.image("final_error.png")
         return pd.DataFrame()
 
     finally:
@@ -207,7 +209,6 @@ def main():
 
     st.title("🏦 BDDK Gelişmiş Analiz")
 
-    # Session State
     if 'scraped_data' not in st.session_state:
         st.session_state['scraped_data'] = None
 
@@ -216,7 +217,6 @@ def main():
             st.error("Lütfen Taraf ve Veri seçiniz.")
         else:
             status_text = st.empty()
-            # Önceki datayı temizle
             st.session_state['scraped_data'] = None
 
             df_yeni = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_text)
@@ -225,28 +225,26 @@ def main():
                 st.session_state['scraped_data'] = df_yeni
                 status_text.success("✅ İŞLEM BAŞARILI! Analiz yükleniyor...")
                 time.sleep(1)
-                st.rerun()  # Sayfayı yenile ki aşağıdaki IF bloğu çalışsın
+                st.rerun()
             else:
-                status_text.error("⚠️ Veri seti boş döndü. (Süre yetmemiş olabilir veya veri o tarihte yoktur)")
+                status_text.error("⚠️ Veri seti boş döndü. Süre yetmemiş olabilir, tekrar deneyin.")
 
-    # --- DASHBOARD (Veri Varsa Göster) ---
+    # --- DASHBOARD ---
     if st.session_state['scraped_data'] is not None and not st.session_state['scraped_data'].empty:
         df = st.session_state['scraped_data']
-
-        # Tarih sırlaması için Dönüştür
-        # "Ocak 2024" -> datetime
-        # (Basit çözüm: Ayları sayıya çevirip sırala)
 
         tab1, tab2, tab3 = st.tabs(["📊 GRAFİK", "📑 TABLO", "📥 İNDİR"])
 
         with tab1:
-            kalem = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
-            df_c = df[df["Kalem"] == kalem]
-
-            fig = px.line(df_c, x="Dönem", y="Değer", color="Taraf", markers=True,
-                          title=f"{kalem} Analizi",
-                          color_discrete_sequence=["#FCB131", "#000000", "#FF5733"])
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                kalem = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
+                df_c = df[df["Kalem"] == kalem]
+                fig = px.line(df_c, x="Dönem", y="Değer", color="Taraf", markers=True,
+                              title=f"{kalem} Analizi",
+                              color_discrete_sequence=["#FCB131", "#000000", "#FF5733"])
+                st.plotly_chart(fig, use_container_width=True)
+            except:
+                st.warning("Grafik oluşturulamadı.")
 
         with tab2:
             st.dataframe(df.pivot_table(index="Dönem", columns=["Kalem", "Taraf"], values="Değer", aggfunc="sum"),
