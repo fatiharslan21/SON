@@ -18,26 +18,52 @@ import time
 import sys
 import locale
 
-# Türkçe Tarih Ayarı (Linux/Windows uyumlu)
-try:
-    locale.setlocale(locale.LC_ALL, 'tr_TR.UTF-8')
-except:
-    try:
-        locale.setlocale(locale.LC_ALL, 'Turkish_Turkey.1254')
-    except:
-        pass
-
 # --- 1. AYARLAR VE TASARIM ---
-st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="BDDK Analiz Pro", layout="wide", page_icon="🏦")
 
+# CSS AYARLARI (BUTON RENGİ DÜZELTİLDİ)
 st.markdown("""
 <style>
-    .stApp { background-color: #F4F4F4; }
-    [data-testid="stSidebar"] { background-color: #FCB131; border-right: 1px solid #e0e0e0; }
-    [data-testid="stSidebar"] * { color: #000000 !important; }
-    div.stButton > button { background-color: #000000; color: #FCB131 !important; border-radius: 8px; width: 100%; padding: 12px; }
-    div.stButton > button:hover { background-color: #333333; color: #FFFFFF !important; transform: scale(1.02); }
-    [data-testid="stMetric"] { background-color: #FFFFFF; padding: 15px; border-radius: 12px; border-left: 6px solid #FCB131; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    /* Genel Arka Plan */
+    .stApp { background-color: #F8F9FA; }
+
+    /* Yan Menü */
+    [data-testid="stSidebar"] { 
+        background-color: #FCB131; 
+        border-right: 1px solid #d1d1d1;
+    }
+    [data-testid="stSidebar"] * { 
+        color: #000000 !important; 
+        font-family: 'Arial', sans-serif;
+    }
+
+    /* BUTON AYARLARI - DÜZELTİLDİ: Sarı Zemin, Siyah Yazı */
+    div.stButton > button { 
+        background-color: #000000 !important; 
+        color: #FCB131 !important; /* Sarı yazı */
+        font-weight: 900; 
+        border-radius: 8px; 
+        border: 2px solid #000000; 
+        width: 100%; 
+        padding: 12px;
+        font-size: 16px;
+        transition: all 0.3s ease;
+    }
+    div.stButton > button:hover { 
+        background-color: #FCB131 !important; /* Üzerine gelince Sarı */
+        color: #000000 !important; /* Yazı siyah */
+        border: 2px solid #000000;
+        transform: scale(1.02);
+    }
+
+    /* Metrik Kartları */
+    [data-testid="stMetric"] {
+        background-color: #FFFFFF;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        border-top: 5px solid #FCB131;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -64,7 +90,7 @@ VERI_KONFIGURASYONU = {
 }
 
 
-# --- 3. DRIVER YÖNETİMİ ---
+# --- 3. DRIVER ---
 @st.cache_resource
 def get_driver():
     if sys.platform == "linux":
@@ -77,98 +103,108 @@ def get_driver():
         return webdriver.Firefox(service=service, options=options)
     else:
         options = ChromeOptions()
-        # options.add_argument("--headless") # Hata ayıklarken bunu kapatabilirsin
+        # Debug yaparken headless'ı kapatabilirsin, production'da aç
+        options.add_argument("--headless")
         service = ChromeService(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
 
 
-# --- 4. VERİ ÇEKME MOTORU (SENİN SAĞLAM MANTIĞIN) ---
+# --- 4. VERİ ÇEKME MOTORU (GARANTİCİ YÖNTEM) ---
 def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
     driver = None
     data = []
 
     try:
         driver = get_driver()
-        driver.set_page_load_timeout(60)
-        status_container.info("🌐 BDDK Bağlantısı Kuruluyor...")
-        driver.get("https://www.bddk.org.tr/bultenaylik")
+        # Sayfa yüklenmezse beklemesin, timeout verip devam etsin
+        driver.set_page_load_timeout(30)
 
-        # Sayfanın oturması için bekle
-        time.sleep(3)
+        status_container.info("🌐 BDDK sunucularına bağlanılıyor...")
+        driver.get("https://www.bddk.org.tr/bultenaylik")
+        time.sleep(3)  # İlk açılış beklemesi
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
 
-        # Toplam adım sayısı (Progress Bar için)
+        # İlerleme Çubuğu İçin
         total_steps = (bit_yil - bas_yil) * 12 + (bit_idx - bas_idx) + 1
         current_step = 0
         progress_bar = st.progress(0)
 
-        # --- DÖNGÜ MANTIĞI: Yıl -> Ay ---
+        # --- YIL DÖNGÜSÜ ---
         for yil in range(bas_yil, bit_yil + 1):
             s_m = bas_idx if yil == bas_yil else 0
             e_m = bit_idx if yil == bit_yil else 11
 
+            # YILI SEÇ (Her yıl değiştiğinde)
+            try:
+                driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
+                select_yil = Select(driver.find_element(By.ID, "ddlYil"))
+                select_yil.select_by_visible_text(str(yil))
+                time.sleep(2)  # Yıl değişince sayfa yenilenir
+            except Exception as e:
+                st.error(f"Yıl seçilemedi: {e}")
+
+            # --- AY DÖNGÜSÜ ---
             for ay_i in range(s_m, e_m + 1):
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
-                status_container.info(f"⏳ İşleniyor: **{donem}** (Lütfen bekleyiniz, sayfa yenileniyor...)")
+                status_container.warning(f"🔄 Veri Çekiliyor: **{donem}**")
 
                 try:
-                    # 1. YIL SEÇİMİ
-                    driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
-                    select_yil = Select(driver.find_element(By.ID, "ddlYil"))
-                    select_yil.select_by_visible_text(str(yil))
-                    time.sleep(2.5)  # Sayfa refresh süresi
-
-                    # 2. AY SEÇİMİ
+                    # AYI SEÇ
                     driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
+                    # DİKKAT: Elementi her seferinde yeniden buluyoruz (Stale Element Hatası Olmasın diye)
                     select_ay = Select(driver.find_element(By.ID, "ddlAy"))
                     select_ay.select_by_visible_text(ay_str)
-                    time.sleep(2.5)  # Sayfa refresh süresi
 
-                    # 3. TARAF SEÇİMİ
+                    # KRİTİK BEKLEME: Sayfanın yenilenmesini bekle
+                    time.sleep(3)
+
+                    # --- TARAF DÖNGÜSÜ ---
                     for taraf in secilen_taraflar:
+                        # TARAFI SEÇ
                         driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
                         select_taraf = Select(driver.find_element(By.ID, "ddlTaraf"))
 
-                        # Kısmi eşleşme ile seç
-                        found = False
+                        # Tarafı bul ve seç
                         for opt in select_taraf.options:
                             if taraf in opt.text:
                                 select_taraf.select_by_visible_text(opt.text)
-                                found = True
                                 break
-                        if not found: continue
 
-                        time.sleep(2)  # Taraf değişince tablo güncelleniyor, bekle!
+                        # KRİTİK BEKLEME: Taraf değişince tablo yenilenir
+                        time.sleep(2.5)
 
-                        # 4. VERİ ÇEKME (HTML Parse)
+                        # ARTIK HTML'İ ALABİLİRİZ
+                        # Bu komut en son yüklenen sayfanın HTML'ini alır
                         soup = BeautifulSoup(driver.page_source, 'html.parser')
 
+                        # İSTENEN VERİLERİ BUL
                         for veri in secilen_veriler:
                             conf = VERI_KONFIGURASYONU[veri]
 
-                            # Sekme Tıklama (Gerekirse)
+                            # Sekme Değiştirme (Eğer gerekliyse)
                             if conf['tab'] not in driver.page_source:
                                 try:
                                     driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
                                     time.sleep(1)
-                                    soup = BeautifulSoup(driver.page_source, 'html.parser')
+                                    soup = BeautifulSoup(driver.page_source, 'html.parser')  # HTML'i güncelle
                                 except:
                                     pass
 
-                            # Satır ve Sütun Bulma
+                            # Tablo Satırlarını Tara
                             target_rows = soup.find_all("tr")
                             for row in target_rows:
                                 if conf['row_text'] in row.get_text():
                                     cols = row.find_all("td")
                                     found_val = None
 
+                                    # Sütunları tara
                                     for col in cols:
                                         if conf['col_id'] in str(col.attrs):
                                             raw_text = col.get_text().strip()
-                                            # Temizlik: 1.234,56 -> 1234.56 formatına
+                                            # Sayıya çevir (1.250,50 -> 1250.50)
                                             clean_text = raw_text.replace('.', '').replace(',', '.')
                                             try:
                                                 found_val = float(clean_text)
@@ -182,162 +218,127 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                             "Taraf": taraf,
                                             "Kalem": veri,
                                             "Değer": found_val,
-                                            # Sıralama için gerçek tarih objesi
                                             "TarihObj": pd.Timestamp(year=yil, month=ay_i + 1, day=1)
                                         })
-                                    break  # Satırı bulduk, çık
+                                    break  # Satırı bulduk, diğer satırlara bakma
 
-                except Exception as step_e:
-                    st.warning(f"Veri atlandı ({donem}): {step_e}")
+                except Exception as loop_e:
+                    st.error(f"Döngü hatası ({donem}): {loop_e}")
 
                 current_step += 1
                 progress_bar.progress(min(current_step / max(1, total_steps), 1.0))
 
     except Exception as e:
-        st.error(f"Bağlantı Hatası: {e}")
+        st.error(f"Genel Hata: {e}")
     finally:
         if driver: driver.quit()
 
     return pd.DataFrame(data)
 
 
-# --- ANA EKRAN ---
+# --- YAN MENÜ ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/e/e0/Vak%C4%B1fBank_logo.svg", width=200)
-    st.title("BDDK ANALİZÖR")
-    st.markdown("---")
+    st.header("⚙️ AYARLAR")
 
-    c1, c2 = st.columns(2)
-    bas_yil = c1.number_input("Başlangıç Yılı", 2020, 2030, 2024)
-    bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0)
+    col1, col2 = st.columns(2)
+    bas_yil = col1.number_input("Başlangıç Yıl", 2020, 2030, 2024)
+    bas_ay = col2.selectbox("Başlangıç Ay", AY_LISTESI, index=0)
 
-    c3, c4 = st.columns(2)
-    bit_yil = c3.number_input("Bitiş Yılı", 2020, 2030, 2024)
-    bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=2)  # Mart varsayılan
-
-    st.markdown("---")
-    secilen_taraflar = st.multiselect("Banka Grubu:", TARAF_SECENEKLERI, default=["Sektör"])
-    secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
+    col3, col4 = st.columns(2)
+    bit_yil = col3.number_input("Bitiş Yıl", 2020, 2030, 2024)
+    bit_ay = col4.selectbox("Bitiş Ay", AY_LISTESI, index=2)  # Mart
 
     st.markdown("---")
-    btn = st.button("🚀 VERİLERİ ÇEK VE ANALİZ ET")
+    secilen_taraflar = st.multiselect("Banka Grubu", TARAF_SECENEKLERI, default=["Sektör"])
+    secilen_veriler = st.multiselect("Veri Kalemleri", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
 
-st.title("🏦 BDDK Finansal Zeka ve Simülasyonu")
+    st.markdown("---")
+    btn = st.button("VERİLERİ ÇEK 🚀")
 
+st.title("🏦 BDDK Finansal Analiz Paneli")
+
+# Session State Tanımla
 if 'df_sonuc' not in st.session_state:
     st.session_state['df_sonuc'] = None
 
 if btn:
-    status = st.empty()
-    st.session_state['df_sonuc'] = None
+    status_box = st.empty()
+    st.session_state['df_sonuc'] = None  # Eski veriyi temizle
 
-    # Veri Çekme Fonksiyonunu Çağır
-    df = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status)
+    df = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_box)
 
     if not df.empty:
-        # Sayısal Dönüşüm ve Sıralama (HAYATİ!)
+        # Sayısal düzeltme
         df["Değer"] = pd.to_numeric(df["Değer"], errors='coerce')
         df = df.sort_values("TarihObj")
 
         st.session_state['df_sonuc'] = df
-        status.success("✅ Veriler Başarıyla Güncellendi!")
+        status_box.success("✅ Veriler başarıyla çekildi!")
         time.sleep(1)
         st.rerun()
     else:
-        status.error("Veri çekilemedi. Bağlantıyı kontrol edip tekrar deneyin.")
+        status_box.error("Veri bulunamadı veya bağlantı hatası.")
 
-# --- DASHBOARD MODÜLÜ ---
+# --- DASHBOARD ---
 if st.session_state['df_sonuc'] is not None:
     df = st.session_state['df_sonuc']
 
-    # 1. KPI KARTLARI (SON AY)
+    # SON DURUM KARTLARI
     son_tarih = df["TarihObj"].max()
     df_son = df[df["TarihObj"] == son_tarih]
 
-    st.markdown(f"### 📊 Özet Durum ({df_son.iloc[0]['Dönem']})")
+    st.markdown(f"### 📊 Pazar Durumu ({df_son.iloc[0]['Dönem']})")
     cols = st.columns(4)
-
     for i, (idx, row) in enumerate(df_son.head(4).iterrows()):
-        # Önceki Ayı Bul
-        prev_date = son_tarih - pd.DateOffset(months=1)
-        df_prev = df[(df["TarihObj"].dt.year == prev_date.year) &
-                     (df["TarihObj"].dt.month == prev_date.month) &
-                     (df["Kalem"] == row["Kalem"]) &
-                     (df["Taraf"] == row["Taraf"])]
-
-        prev_val = df_prev.iloc[0]["Değer"] if not df_prev.empty else row["Değer"]
-        degisim = ((row["Değer"] - prev_val) / prev_val * 100) if prev_val != 0 else 0
-
-        with cols[i % 4]:
-            st.metric(f"{row['Taraf']} - {row['Kalem'][:10]}..", f"{row['Değer']:,.0f}", f"%{degisim:.2f}")
+        with cols[i]:
+            st.metric(f"{row['Taraf']}", f"{row['Değer']:,.0f}", f"{row['Kalem'][:15]}...")
 
     st.markdown("---")
 
     # SEKMELER
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Trend Analizi", "🔮 Gelecek Simülasyonu", "🌡️ Heatmap", "📥 Excel İndir"])
+    tab1, tab2, tab3 = st.tabs(["📈 Trend", "🔮 Simülasyon", "📥 Excel"])
 
-    # --- TAB 1: GRAFİK ---
     with tab1:
-        g_kalem = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
-        df_g = df[df["Kalem"] == g_kalem]
+        # GRAFİK
+        g_kalem = st.selectbox("Grafik Verisi:", df["Kalem"].unique())
+        df_g = df[df["Kalem"] == g_kalem].sort_values("TarihObj")
 
         fig = px.area(df_g, x="TarihObj", y="Değer", color="Taraf",
-                      title=f"{g_kalem} Gelişimi",
+                      title=f"{g_kalem} Zaman Serisi",
                       color_discrete_sequence=["#FCB131", "#333333", "#A6A6A6"])
         st.plotly_chart(fig, use_container_width=True)
 
-        # Waterfall (Değişim) Grafiği
-        st.subheader("Aylık Değişim Analizi")
-        df_g = df_g.sort_values("TarihObj")
-        df_g['Onceki'] = df_g.groupby('Taraf')['Değer'].shift(1)
-        df_g['Fark'] = df_g['Değer'] - df_g['Onceki']
-
-        fig_water = px.bar(df_g.dropna(), x="Dönem", y="Fark", color="Taraf",
-                           title="Aylık Net Değişim (Miktar)", barmode="group")
-        st.plotly_chart(fig_water, use_container_width=True)
-
-    # --- TAB 2: SİMÜLASYON ---
     with tab2:
-        c_sim1, c_sim2 = st.columns([1, 3])
-        with c_sim1:
-            st.info("Aylık büyüme oranını değiştirerek gelecek 6 ayı tahminle.")
-            s_oran = st.slider("Aylık Büyüme (%)", -5.0, 10.0, 2.0)
-            s_kalem = st.selectbox("Simülasyon Kalemi", df["Kalem"].unique())
+        # SİMÜLASYON
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            oran = st.slider("Aylık Büyüme Tahmini (%)", -5.0, 10.0, 3.0)
+            s_kalem = st.selectbox("Hangi Veri?", df["Kalem"].unique())
 
-        with c_sim2:
-            df_sim_base = df[df["Kalem"] == s_kalem]
-            sim_list = []
+        with c2:
+            # Basit projeksiyon
+            df_sim = df[df["Kalem"] == s_kalem].copy()
+            future_data = []
+            for taraf in df_sim["Taraf"].unique():
+                last_val = df_sim[df_sim["Taraf"] == taraf].iloc[-1]["Değer"]
+                last_date = df_sim["TarihObj"].max()
 
-            for taraf in df_sim_base["Taraf"].unique():
-                base_val = df_sim_base[df_sim_base["Taraf"] == taraf].sort_values("TarihObj").iloc[-1]["Değer"]
-                current_date = df_sim_base["TarihObj"].max()
+                # Geçmiş
+                for _, r in df_sim[df_sim["Taraf"] == taraf].iterrows():
+                    future_data.append({"Tarih": r["TarihObj"], "Değer": r["Değer"], "Tip": "Gerçek"})
 
-                # Geçmiş veriyi ekle
-                for _, r in df_sim_base[df_sim_base["Taraf"] == taraf].iterrows():
-                    sim_list.append({"Tarih": r["TarihObj"], "Değer": r["Değer"], "Tip": "Gerçekleşen", "Taraf": taraf})
+                # Gelecek
+                curr = last_val
+                dt = last_date
+                for _ in range(6):
+                    dt += pd.DateOffset(months=1)
+                    curr *= (1 + oran / 100)
+                    future_data.append({"Tarih": dt, "Değer": curr, "Tip": "Tahmin"})
 
-                # Gelecek 6 ay
-                temp_val = base_val
-                for m in range(1, 7):
-                    current_date += pd.DateOffset(months=1)
-                    temp_val *= (1 + s_oran / 100)
-                    sim_list.append({"Tarih": current_date, "Değer": temp_val, "Tip": "Tahmin", "Taraf": taraf})
+            df_f = pd.DataFrame(future_data)
+            fig_f = px.line(df_f, x="Tarih", y="Değer", line_dash="Tip", title="6 Aylık Tahmin")
+            st.plotly_chart(fig_f, use_container_width=True)
 
-            df_sim = pd.DataFrame(sim_list)
-            fig_sim = px.line(df_sim, x="Tarih", y="Değer", color="Taraf", line_dash="Tip", title="6 Aylık Projeksiyon")
-            st.plotly_chart(fig_sim, use_container_width=True)
-
-    # --- TAB 3: HEATMAP ---
     with tab3:
-        h_kalem = st.selectbox("Heatmap Verisi:", df["Kalem"].unique(), key="hm")
-        df_h = df[df["Kalem"] == h_kalem].copy()
-        df_h["Ay"] = df_h["TarihObj"].dt.strftime("%Y-%m")
-
-        pivot = df_h.pivot(index="Taraf", columns="Ay", values="Değer")
-        fig_hm = px.imshow(pivot, text_auto=".2s", color_continuous_scale="Viridis", aspect="auto")
-        st.plotly_chart(fig_hm, use_container_width=True)
-
-    # --- TAB 4: EXCEL ---
-    with tab4:
         st.dataframe(df)
-        # Excel indirme logic'i buraya eklenebilir
