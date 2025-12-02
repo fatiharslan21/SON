@@ -89,8 +89,8 @@ def get_driver():
 
 
 # --- 4. VERİ ÇEKME MOTORU ---
-@st.cache_data(show_spinner=False)
-def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler):
+# Progress bar isteği için cache kaldırıldı, canlı takip eklendi.
+def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, progress_bar_obj):
     driver = None
     data = []
 
@@ -107,6 +107,10 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
+
+        # Toplam adım sayısını hesapla (Progress Bar için)
+        total_steps = (bit_yil - bas_yil) * 12 + (bit_idx - bas_idx) + 1
+        current_step = 0
 
         for yil in range(bas_yil, bit_yil + 1):
             s_m = bas_idx if yil == bas_yil else 0
@@ -193,6 +197,11 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
                 except Exception as e:
                     pass
 
+                # Progress Bar Güncelle
+                current_step += 1
+                if progress_bar_obj:
+                    progress_bar_obj.progress(min(current_step / max(1, total_steps), 1.0))
+
     except Exception as e:
         pass
     finally:
@@ -205,18 +214,20 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
 with st.sidebar:
     st.title("🎛️ KONTROL PANELİ")
     st.markdown("---")
+    # 'key' parametreleri eklendi, böylece arayüz hatası oluşmaz.
     c1, c2 = st.columns(2)
-    bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024)
-    bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0)
+    bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024, key="sb_bas_yil")
+    bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0, key="sb_bas_ay")
     c3, c4 = st.columns(2)
-    bit_yil = c3.number_input("Bitiş Yılı", 2024, 2030, 2024)
-    bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0)
+    bit_yil = c3.number_input("Bitiş Yılı", 2024, 2030, 2024, key="sb_bit_yil")
+    bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0, key="sb_bit_ay")
     st.markdown("---")
-    secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"])
-    secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
+    secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"], key="sb_taraflar")
+    secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"],
+                                     key="sb_veriler")
     st.markdown("---")
     st.markdown("### 🚀 İŞLEM MERKEZİ")
-    btn = st.button("ANALİZİ BAŞLAT")
+    btn = st.button("ANALİZİ BAŞLAT", key="sb_btn_baslat")
 
 st.title("🏦 BDDK Finansal Analiz Pro")
 
@@ -227,8 +238,16 @@ if btn:
     if not secilen_taraflar or not secilen_veriler:
         st.warning("Lütfen en az bir Taraf ve bir Veri kalemi seçin.")
     else:
-        with st.spinner("Veriler BDDK'dan çekiliyor, lütfen bekleyiniz..."):
-            df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler)
+        # Progress bar konteyneri
+        p_text = st.empty()
+        p_text.info("🌐 BDDK'ya bağlanılıyor, lütfen bekleyiniz...")
+        my_bar = st.progress(0)
+
+        df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, my_bar)
+
+        # Temizlik
+        my_bar.empty()
+        p_text.empty()
 
         if not df.empty:
             st.session_state['df_sonuc'] = df
@@ -242,7 +261,6 @@ if btn:
 # --- DASHBOARD ---
 if st.session_state['df_sonuc'] is not None:
     df = st.session_state['df_sonuc']
-    # Çoklamaları Temizle
     df = df.drop_duplicates(subset=["Dönem", "Taraf", "Kalem"])
     df = df.sort_values("TarihObj")
 
@@ -270,11 +288,10 @@ if st.session_state['df_sonuc'] is not None:
         st.error(f"Metrik hatası: {e}")
 
     st.markdown("---")
-    # Pazar Payı kaldırıldı
     tab1, tab2, tab3 = st.tabs(["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📑 Detaylı Tablo"])
 
     with tab1:
-        kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
+        kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique(), key="trend_select")
         df_chart = df[df["Kalem"] == kalem_sec].copy()
         df_chart = df_chart.sort_values("TarihObj")
 
@@ -284,17 +301,18 @@ if st.session_state['df_sonuc'] is not None:
 
         fig.update_xaxes(categoryorder='array', categoryarray=df_chart["Dönem"].unique())
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="x unified")
-        fig.update_yaxes(tickformat=",")  # Grafikte binlik ayracı
-        st.plotly_chart(fig, use_container_width=True)
+        fig.update_yaxes(tickformat=",")
+        st.plotly_chart(fig, use_container_width=True, key="trend_chart")
 
     with tab2:
         st.markdown("#### 🧪 What-If (Senaryo) Analizi")
         st.info("Seçtiğiniz tarafın verilerini sanal olarak artırıp azaltarak sonucu simüle edin.")
         c_sim1, c_sim2 = st.columns([1, 2])
         with c_sim1:
-            taraf_sim = st.selectbox("Simüle Edilecek Taraf:", df["Taraf"].unique())
-            kalem_sim = st.selectbox("Simüle Edilecek Kalem:", df["Kalem"].unique())
-            artis_orani = st.slider("Değişim Oranı (%)", min_value=-50, max_value=50, value=10, step=5)
+            taraf_sim = st.selectbox("Simüle Edilecek Taraf:", df["Taraf"].unique(), key="sim_taraf")
+            kalem_sim = st.selectbox("Simüle Edilecek Kalem:", df["Kalem"].unique(), key="sim_kalem")
+            artis_orani = st.slider("Değişim Oranı (%)", min_value=-50, max_value=50, value=10, step=5,
+                                    key="sim_slider")
         with c_sim2:
             base_row = df[
                 (df["Taraf"] == taraf_sim) & (df["Kalem"] == kalem_sim) & (df["TarihObj"] == df["TarihObj"].max())]
@@ -310,28 +328,37 @@ if st.session_state['df_sonuc'] is not None:
                 fig_sim = px.bar(sim_data, x="Durum", y="Tutar", color="Durum", text_auto='.2s',
                                  color_discrete_map={"Mevcut": "#000000", "Simülasyon": "#FCB131"})
                 fig_sim.update_layout(height=300, showlegend=False)
-                st.plotly_chart(fig_sim, use_container_width=True)
+                st.plotly_chart(fig_sim, use_container_width=True, key="sim_chart")
 
     with tab3:
         st.markdown("#### 📑 Ham Veri Tablosu")
-        # TarihObj'yi sıralama için kullan ama göstermek için drop et
-        df_display = df.sort_values(["TarihObj", "Taraf", "Kalem"]).drop(columns=["TarihObj"])
+        # Kalem ve TarihObj sütunlarını ekran için kaldır
+        df_display = df.sort_values(["TarihObj", "Taraf", "Kalem"]).drop(columns=["TarihObj", "Kalem"])
 
-        # Ekran ve Excel için binlik formatlama (Noktalı string format)
-        # Not: Excel'de bu string olarak görünür ama "1.000" formatını kullanıcı istedi.
-        df_formatted = df_display.copy()
-        df_formatted["Değer"] = df_formatted["Değer"].apply(lambda x: "{:,.0f}".format(x).replace(",", "."))
+        # Ekran için formatlama (Noktalı)
+        df_formatted_display = df_display.copy()
+        df_formatted_display["Değer"] = df_formatted_display["Değer"].apply(
+            lambda x: "{:,.0f}".format(x).replace(",", "."))
 
-        st.dataframe(df_formatted, use_container_width=True)
+        st.dataframe(df_formatted_display, use_container_width=True)
 
-        # --- EXCEL ÇIKTISI (HER VERİ AYRI SAYFA + FORMATLI) ---
+        # --- EXCEL ÇIKTISI ---
+        # Excel için orijinal df'yi (Kalem sütunu olan) kullanıyoruz ki sayfalara ayırabilelim.
+        # Ama formatlı (noktalı) istendiği için string'e çeviriyoruz.
+        df_for_excel = df.copy().sort_values(["TarihObj", "Taraf", "Kalem"]).drop(columns=["TarihObj"])
+        df_for_excel["Değer"] = df_for_excel["Değer"].apply(lambda x: "{:,.0f}".format(x).replace(",", "."))
+
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer) as writer:
-            unique_kalemler = df_formatted["Kalem"].unique()
+            unique_kalemler = df_for_excel["Kalem"].unique()
             for kalem_adi in unique_kalemler:
                 # O kaleme ait veriyi süz
-                sub_df = df_formatted[df_formatted["Kalem"] == kalem_adi]
-                # Sayfa ismi max 31 karakter olabilir, Excel kuralı
+                sub_df = df_for_excel[df_for_excel["Kalem"] == kalem_adi].copy()
+                # Excel'de de Kalem sütunu gereksiz ise kaldırabiliriz ama sayfa adı zaten kalem adı.
+                # Kullanıcı sadece "Veri çeşidi farklı sayfalarda olsun" dedi, sütun kaldırma sadece tablo içindi.
+                # Temizlik için Excel içinden de Kalem sütununu kaldırıyorum çünkü sayfa adı zaten o.
+                sub_df = sub_df.drop(columns=["Kalem"])
+
                 sheet_name = kalem_adi[:30].replace("/", "-").replace("\\", "-")
                 sub_df.to_excel(writer, index=False, sheet_name=sheet_name)
 
@@ -339,5 +366,6 @@ if st.session_state['df_sonuc'] is not None:
             label="💾 Excel İndir",
             data=buffer.getvalue(),
             file_name="bddk_analiz.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_excel"
         )
