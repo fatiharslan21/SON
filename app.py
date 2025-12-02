@@ -220,44 +220,42 @@ def get_driver():
 # --- 4. VERİ ÇEKME MOTORU ---
 
 # --- 4. VERİ ÇEKME MOTORU (GÜNCELLENDİ) ---
+# --- 4. VERİ ÇEKME MOTORU (KESİN ÇÖZÜM) ---
 def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
     driver = None
     data = []
 
-    # Yardımcı Fonksiyon: Seçim yap ve sayfanın tepki vermesini bekle
+    # Yardımcı Fonksiyon: Güvenli Seçim
     def safe_select(driver, element_id, visible_text):
         try:
-            # 1. Elementi görünür yap (BDDK gizliyor olabilir)
+            # Dropdown'ı görünür yap
             driver.execute_script(f"document.getElementById('{element_id}').style.display = 'block';")
-            time.sleep(0.5)
 
-            # 2. Elementi taze olarak bul
             select_element = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.ID, element_id))
             )
             sel = Select(select_element)
 
-            # 3. Zaten seçiliyse işlem yapma (Zaman kazandırır)
+            # Zaten seçiliyse işlem yapma ama yine de bekle (sayfa oturması için)
             if sel.first_selected_option.text.strip() == visible_text.strip():
+                time.sleep(1)
                 return
 
-            # 4. Seçimi yap
+            # Seçimi yap
             sel.select_by_visible_text(visible_text)
 
-            # 5. KRİTİK NOKTA: Sayfanın yenilenmesini (PostBack) bekle
-            # BDDK'da seçim yapınca bir yükleme olur, bunu beklemek için basit bir sleep koyuyoruz.
-            # Daha sofistike yöntem 'staleness_of' olsa da BDDK için sleep daha stabil çalışıyor.
+            # SEÇİM SONRASI BEKLEME (BDDK İçin Kritik)
             time.sleep(3)
 
         except Exception as e:
-            # Hata olursa bir kez daha dene (Retrying mechanism)
+            # Hata durumunda tekrar dene
             time.sleep(2)
             try:
                 driver.execute_script(f"document.getElementById('{element_id}').style.display = 'block';")
                 Select(driver.find_element(By.ID, element_id)).select_by_visible_text(visible_text)
                 time.sleep(3)
             except:
-                pass  # Loglayabilirsin
+                pass
 
     try:
         driver = get_driver()
@@ -265,7 +263,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
         status_container.info("🌐 BDDK sistemine bağlanılıyor...")
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
-        # Sayfanın ilk yüklenmesini bekle
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "ddlYil")))
         time.sleep(2)
 
@@ -282,78 +279,96 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
             for ay_i in range(s_m, e_m + 1):
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
-                status_container.info(f"⏳ İşleniyor: **{donem}** | Lütfen bekleyin, veriler anlık çekiliyor...")
+                status_container.info(f"⏳ İşleniyor: **{donem}**")
 
                 try:
-                    # ADIM 1: YILI SEÇ (Her döngüde garanti olsun diye tekrar seçiyoruz)
+                    # 1. YIL SEÇİMİ
                     safe_select(driver, "ddlYil", str(yil))
 
-                    # ADIM 2: AYI SEÇ
+                    # 2. AY SEÇİMİ
                     safe_select(driver, "ddlAy", ay_str)
 
-                    # ADIM 3: TARAFLARI DÖN
+                    # 3. TARAF DÖNGÜSÜ
                     for taraf in secilen_taraflar:
-                        # Tarafı seçerken hata olmaması için try-catch
                         try:
-                            # Taraf dropdown'ı bazen isimleri tam eşleşmeyebilir, içeriyorsa seçtiriyoruz
+                            # Taraf seçiminden önce HTML elementini tazeleyelim
                             driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
                             taraf_select = Select(driver.find_element(By.ID, "ddlTaraf"))
 
-                            found_opt = False
+                            secilecek_metin = None
                             for opt in taraf_select.options:
                                 if taraf in opt.text:
-                                    safe_select(driver, "ddlTaraf", opt.text)
-                                    found_opt = True
+                                    secilecek_metin = opt.text
                                     break
 
-                            if not found_opt: continue  # Taraf bulunamazsa geç
+                            if secilecek_metin:
+                                # Tarafı seçiyoruz
+                                taraf_select.select_by_visible_text(secilecek_metin)
+
+                                # --- KRİTİK NOKTA BURASI ---
+                                # Taraf değiştikten sonra tablonun güncellenmesi için
+                                # mutlaka beklemeliyiz. BDDK bazen 3-4 saniye bekletiyor.
+                                time.sleep(4)
+
+                                # Sayfanın tamamen yüklendiğinden emin olmak için body'ye tıklama simülasyonu (Focus kaybı için)
+                                driver.find_element(By.TAG_NAME, 'body').click()
+                            else:
+                                continue
+
+                            # 4. HTML'İ SIFIRDAN OKU (Eski veriyi ezmek için şart)
+                            soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+                            for veri in secilen_veriler:
+                                conf = VERI_KONFIGURASYONU[veri]
+
+                                # Sekme değişimi gerekiyorsa yap
+                                try:
+                                    driver.execute_script(
+                                        f"if(document.getElementById('{conf['tab']}')) document.getElementById('{conf['tab']}').click();")
+                                    time.sleep(1)  # Sekme animasyonu beklemesi
+                                    # Sekme değişince HTML yine değişir, tekrar oku
+                                    soup = BeautifulSoup(driver.page_source, 'html.parser')
+                                except:
+                                    pass
+
+                                target_rows = soup.find_all("tr")
+                                found_val = None
+
+                                for row in target_rows:
+                                    row_text = row.get_text()
+                                    if conf['row_text'] in row_text:
+                                        cols = row.find_all("td")
+                                        for col in cols:
+                                            cell_attrs = str(col.attrs)
+                                            if conf['col_id'] in cell_attrs:
+                                                # Boşluk ve format temizliği
+                                                raw_text = col.get_text().strip()
+                                                # Eğer veri boşsa veya '-' ise 0 yap
+                                                if not raw_text or raw_text == '-':
+                                                    found_val = 0.0
+                                                else:
+                                                    clean_text = raw_text.replace('.', '').replace(',', '.')
+                                                    try:
+                                                        found_val = float(clean_text)
+                                                    except:
+                                                        found_val = 0.0
+                                                break
+                                    if found_val is not None: break
+
+                                if found_val is not None:
+                                    data.append({
+                                        "Dönem": donem,
+                                        "Taraf": taraf,
+                                        "Kalem": veri,
+                                        "Değer": found_val,
+                                        "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
+                                    })
+                                    # Veriyi bulduktan sonra loga yaz (kontrol için)
+                                    print(f"✅ Çekildi: {donem} - {taraf} - {veri}: {found_val}")
 
                         except Exception as e:
-                            print(f"Taraf seçim hatası: {e}")
+                            print(f"Taraf içi hata ({taraf}): {e}")
                             continue
-
-                        # ADIM 4: VERİLERİ ÇEK
-                        soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-                        for veri in secilen_veriler:
-                            conf = VERI_KONFIGURASYONU[veri]
-
-                            # İlgili sekmeye tıkla (Eğer açık değilse)
-                            try:
-                                # Sekmenin ID'sini bulup tıklıyoruz, JS ile garanti oluyor
-                                driver.execute_script(
-                                    f"if(document.getElementById('{conf['tab']}')) document.getElementById('{conf['tab']}').click();")
-                                time.sleep(0.5)  # Sekme geçişi için minik bekleme
-                                soup = BeautifulSoup(driver.page_source, 'html.parser')  # Kaynağı yenile
-                            except:
-                                pass
-
-                            # Tabloyu ayrıştır
-                            target_rows = soup.find_all("tr")
-                            for row in target_rows:
-                                if conf['row_text'] in row.get_text():
-                                    cols = row.find_all("td")
-                                    found_val = None
-                                    for col in cols:
-                                        cell_attrs = str(col.attrs)
-                                        if conf['col_id'] in cell_attrs:
-                                            raw_text = col.get_text().strip()
-                                            clean_text = raw_text.replace('.', '').replace(',', '.')
-                                            try:
-                                                found_val = float(clean_text)
-                                            except:
-                                                found_val = 0.0
-                                            break
-
-                                    if found_val is not None:
-                                        data.append({
-                                            "Dönem": donem,
-                                            "Taraf": taraf,
-                                            "Kalem": veri,
-                                            "Değer": found_val,
-                                            "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
-                                        })
-                                    break
 
                 except Exception as step_e:
                     st.error(f"Döngü Hatası ({donem}): {step_e}")
