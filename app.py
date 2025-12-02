@@ -18,24 +18,42 @@ import sys
 import io
 
 # --- 1. AYARLAR VE TASARIM ---
-st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦")
+# initial_sidebar_state="expanded" ile menü açık başlar
+st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
     .stApp { background-color: #F9F9F9; }
     [data-testid="stSidebar"] { background-color: #FCB131; border-right: 1px solid #e0e0e0; }
     [data-testid="stSidebar"] * { color: #000000 !important; font-family: 'Segoe UI', sans-serif; }
+
+    /* ANALİZİ BAŞLAT BUTONU: BEYAZ ZEMİN, SİYAH YAZI */
     div.stButton > button { 
-        background-color: #000000 !important; color: #FFFFFF !important; font-weight: 900 !important; 
-        border-radius: 8px; border: 2px solid #FFFFFF; width: 100%; padding: 15px; font-size: 18px !important; 
+        background-color: #FFFFFF !important; 
+        color: #000000 !important; 
+        font-weight: 900 !important; 
+        border-radius: 8px; 
+        border: 2px solid #000000 !important; 
+        width: 100%; 
+        padding: 15px; 
+        font-size: 18px !important; 
         transition: all 0.3s ease; 
     }
-    div.stButton > button:hover { background-color: #333333 !important; color: #FCB131 !important; border-color: #FCB131 !important; transform: scale(1.02); }
+    div.stButton > button:hover { 
+        background-color: #000000 !important; 
+        color: #FFFFFF !important; 
+        border-color: #000000 !important; 
+        transform: scale(1.02); 
+    }
+
     [data-testid="stMetric"] { background-color: #FFFFFF; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #FCB131; }
     [data-testid="stMetricLabel"] { font-weight: bold; color: #555; }
     [data-testid="stMetricValue"] { color: #000000; font-weight: 800; font-size: 26px !important; }
     h1, h2, h3 { color: #d99000 !important; font-weight: 800; }
     .dataframe { font-size: 14px !important; }
+
+    /* YAN PANELİ KAPATMA TUŞUNU GİZLE (SABİT KALSIN) */
+    [data-testid="stSidebarCollapseButton"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -89,8 +107,9 @@ def get_driver():
 
 
 # --- 4. VERİ ÇEKME MOTORU ---
-# Progress bar isteği için cache kaldırıldı, canlı takip eklendi.
-def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, progress_bar_obj):
+# status_text_obj parametresi eklendi: İşlenen ayı yazdırmak için
+def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_text_obj,
+                     progress_bar_obj):
     driver = None
     data = []
 
@@ -108,7 +127,6 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
 
-        # Toplam adım sayısını hesapla (Progress Bar için)
         total_steps = (bit_yil - bas_yil) * 12 + (bit_idx - bas_idx) + 1
         current_step = 0
 
@@ -119,6 +137,10 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
             for ay_i in range(s_m, e_m + 1):
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
+
+                # Progress Bar Üstüne Anlık Bilgi Yaz
+                if status_text_obj:
+                    status_text_obj.info(f"⏳ **İşleniyor:** {donem}")
 
                 try:
                     driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
@@ -197,7 +219,6 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
                 except Exception as e:
                     pass
 
-                # Progress Bar Güncelle
                 current_step += 1
                 if progress_bar_obj:
                     progress_bar_obj.progress(min(current_step / max(1, total_steps), 1.0))
@@ -214,7 +235,7 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
 with st.sidebar:
     st.title("🎛️ KONTROL PANELİ")
     st.markdown("---")
-    # 'key' parametreleri eklendi, böylece arayüz hatası oluşmaz.
+
     c1, c2 = st.columns(2)
     bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024, key="sb_bas_yil")
     bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0, key="sb_bas_ay")
@@ -238,16 +259,18 @@ if btn:
     if not secilen_taraflar or not secilen_veriler:
         st.warning("Lütfen en az bir Taraf ve bir Veri kalemi seçin.")
     else:
-        # Progress bar konteyneri
-        p_text = st.empty()
-        p_text.info("🌐 BDDK'ya bağlanılıyor, lütfen bekleyiniz...")
+        # Progress bar ve durum mesajı (Barın üzerinde)
+        status_txt = st.empty()
+        status_txt.info("🌐 BDDK'ya bağlanılıyor, lütfen bekleyiniz...")
+
         my_bar = st.progress(0)
 
-        df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, my_bar)
+        # Fonksiyona status_txt objesini de gönderiyoruz
+        df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_txt, my_bar)
 
         # Temizlik
         my_bar.empty()
-        p_text.empty()
+        status_txt.empty()
 
         if not df.empty:
             st.session_state['df_sonuc'] = df
@@ -343,8 +366,6 @@ if st.session_state['df_sonuc'] is not None:
         st.dataframe(df_formatted_display, use_container_width=True)
 
         # --- EXCEL ÇIKTISI ---
-        # Excel için orijinal df'yi (Kalem sütunu olan) kullanıyoruz ki sayfalara ayırabilelim.
-        # Ama formatlı (noktalı) istendiği için string'e çeviriyoruz.
         df_for_excel = df.copy().sort_values(["TarihObj", "Taraf", "Kalem"]).drop(columns=["TarihObj"])
         df_for_excel["Değer"] = df_for_excel["Değer"].apply(lambda x: "{:,.0f}".format(x).replace(",", "."))
 
@@ -352,11 +373,7 @@ if st.session_state['df_sonuc'] is not None:
         with pd.ExcelWriter(buffer) as writer:
             unique_kalemler = df_for_excel["Kalem"].unique()
             for kalem_adi in unique_kalemler:
-                # O kaleme ait veriyi süz
                 sub_df = df_for_excel[df_for_excel["Kalem"] == kalem_adi].copy()
-                # Excel'de de Kalem sütunu gereksiz ise kaldırabiliriz ama sayfa adı zaten kalem adı.
-                # Kullanıcı sadece "Veri çeşidi farklı sayfalarda olsun" dedi, sütun kaldırma sadece tablo içindi.
-                # Temizlik için Excel içinden de Kalem sütununu kaldırıyorum çünkü sayfa adı zaten o.
                 sub_df = sub_df.drop(columns=["Kalem"])
 
                 sheet_name = kalem_adi[:30].replace("/", "-").replace("\\", "-")
