@@ -69,7 +69,7 @@ st.markdown("""
 # --- 2. CONFIG ---
 AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
               "Aralık"]
-TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
+TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu"]
 
 VERI_KONFIGURASYONU = {
     "📌 Toplam Aktifler": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
@@ -247,10 +247,10 @@ with st.sidebar:
     st.title("🎛️ KONTROL PANELİ")
     st.markdown("---")
     c1, c2 = st.columns(2)
-    bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024, key="sb_bas_yil")
+    bas_yil = c1.number_input("Başlangıç Yılı", 2022, 2030, 2025, key="sb_bas_yil")
     bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0, key="sb_bas_ay")
     c3, c4 = st.columns(2)
-    bit_yil = c3.number_input("Bitiş Yılı", 2024, 2030, 2024, key="sb_bit_yil")
+    bit_yil = c3.number_input("Bitiş Yılı", 2022, 2030, 2025, key="sb_bit_yil")
     bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0, key="sb_bit_ay")
     st.markdown("---")
     secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"], key="sb_taraflar")
@@ -292,9 +292,8 @@ if st.session_state['df_sonuc'] is not None:
     df = df.sort_values("TarihObj")
 
     # 4 SEKMELİ ŞOV ALANI
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📉 Trend Analizi",
-        "🏁 Zaman Yarışı",
         "🧪 Senaryo",
         "📑 Veri Tablosu",
         "🧠 Akıllı Analiz Botu 2.0"
@@ -311,24 +310,9 @@ if st.session_state['df_sonuc'] is not None:
         fig.update_layout(hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True, key="trend_chart")
 
-    # 2. SEKME: YARIŞ PİSTİ (SHOW)
-    with tab2:
-        st.markdown("#### 🏁 Verilerin Zamanla Yarışı (Animasyon)")
-        st.info("Aşağıdaki 'Play' tuşuna basarak değişimi zaman içinde izleyin.")
-        kalem_race = st.selectbox("Yarışacak Veri:", df["Kalem"].unique(), key="race_select")
-        df_race = df[df["Kalem"] == kalem_race].copy().sort_values("TarihObj")
-
-        # Animasyonun düzgün çalışması için frame'leri sıralı veriyoruz
-        fig_race = px.bar(df_race, x="Taraf", y="Değer", color="Taraf",
-                          animation_frame="Dönem", animation_group="Taraf",
-                          range_y=[0, df_race["Değer"].max() * 1.2],
-                          title=f"🏆 {kalem_race} - Zaman İçindeki Değişim",
-                          color_discrete_sequence=px.colors.qualitative.Bold)
-        fig_race.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = 800  # Hız ayarı
-        st.plotly_chart(fig_race, use_container_width=True, key="race_chart")
 
     # 3. SEKME: SENARYO
-    with tab3:
+    with tab2:
         st.markdown("#### 🧪 What-If Analizi")
         c_sim1, c_sim2 = st.columns([1, 2])
         with c_sim1:
@@ -356,7 +340,7 @@ if st.session_state['df_sonuc'] is not None:
                 st.plotly_chart(fig_sim, use_container_width=True)
 
     # 4. SEKME: TABLO & EXCEL
-    with tab4:
+    with tab3:
         st.markdown("#### 📑 Ham Veri")
         df_display = df.sort_values(["TarihObj", "Kalem", "Taraf"])[["Dönem", "Kalem", "Taraf", "Değer"]]
         df_display_fmt = df_display.copy()
@@ -374,7 +358,7 @@ if st.session_state['df_sonuc'] is not None:
                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_btn")
 
     # 5. SEKME: AKILLI ANALİZ BOTU 2.0 (ŞOV KISMI)
-    with tab5:
+    with tab4:
         st.markdown("#### 🧠 Akıllı Analiz Botu 2.0")
         st.info("Verileri istatistiksel olarak inceler, riskleri ve fırsatları matematiksel olarak bulur.")
 
