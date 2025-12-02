@@ -22,7 +22,7 @@ import os
 # --- 1. AYARLAR VE TASARIM ---
 st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦")
 
-# VAKIFBANK TEMASI VE ŞIK GÖRÜNÜM
+# VAKIFBANK TEMASI - GÜNCELLENMİŞ CSS
 st.markdown("""
 <style>
     /* Genel Arka Plan */
@@ -33,28 +33,30 @@ st.markdown("""
         background-color: #FCB131; 
         border-right: 1px solid #e0e0e0;
     }
+
+    /* Yan Menü Yazı Rengi */
     [data-testid="stSidebar"] * { 
         color: #000000 !important; 
         font-family: 'Segoe UI', sans-serif;
     }
 
-    /* Butonlar - Siyah Zemin, Beyaz Yazı, Sarı Hover */
+    /* BUTON DÜZELTMESİ: SİYAH ZEMİN, BEYAZ YAZI */
     div.stButton > button { 
-        background-color: #000000; 
-        color: #FFFFFF !important; /* YAZI RENGİ BEYAZ OLDU */
-        font-weight: bold; 
+        background-color: #000000 !important; 
+        color: #FFFFFF !important; /* YAZI RENGİ ARTIK BEYAZ */
+        font-weight: 900 !important; 
         border-radius: 8px; 
-        border: none; 
+        border: 2px solid #FFFFFF; 
         width: 100%; 
-        padding: 12px;
-        font-size: 16px;
+        padding: 15px;
+        font-size: 18px !important;
         transition: all 0.3s ease;
     }
     div.stButton > button:hover { 
-        background-color: #333333; 
+        background-color: #333333 !important; 
         color: #FCB131 !important; /* Hoverda Sarı */
+        border-color: #FCB131 !important;
         transform: scale(1.02);
-        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
     }
 
     /* Metrik Kartları */
@@ -71,7 +73,7 @@ st.markdown("""
     /* Başlıklar */
     h1, h2, h3 { color: #d99000 !important; font-weight: 800; }
 
-    /* Tablo Güzelleştirme */
+    /* Tablo Font */
     .dataframe { font-size: 14px !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -81,7 +83,6 @@ AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", 
               "Aralık"]
 TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
 
-# col_id: HTML içinde veriyi tutan hücrenin özel kimliği
 VERI_KONFIGURASYONU = {
     "📌 TOPLAM AKTİFLER": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
     "📌 TOPLAM ÖZKAYNAKLAR": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR",
@@ -147,17 +148,14 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                 status_container.info(f"⏳ İşleniyor: **{donem}**")
 
                 try:
-                    # 1. YIL SEÇİMİ (Mekanik)
                     driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
                     Select(driver.find_element(By.ID, "ddlYil")).select_by_visible_text(str(yil))
                     time.sleep(2)
 
-                    # 2. AY SEÇİMİ
                     driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
                     Select(driver.find_element(By.ID, "ddlAy")).select_by_visible_text(ay_str)
                     time.sleep(4)
 
-                    # 3. TARAF SEÇİMİ
                     for taraf in secilen_taraflar:
                         driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
                         select_taraf = Select(driver.find_element(By.ID, "ddlTaraf"))
@@ -169,10 +167,8 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                 if taraf in opt.text:
                                     select_taraf.select_by_visible_text(opt.text)
                                     break
-
                         time.sleep(3)
 
-                        # HTML ÇEKME
                         soup = BeautifulSoup(driver.page_source, 'html.parser')
 
                         for veri in secilen_veriler:
@@ -221,26 +217,20 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
     return pd.DataFrame(data)
 
 
-# --- 5. ANA EKRAN VE DASHBOARD ---
+# --- ANA EKRAN ---
 with st.sidebar:
-    # VakıfBank Logo URL (Temsili)
-    st.image("https://upload.wikimedia.org/wikipedia/commons/e/e0/Vak%C4%B1fBank_logo.svg", width=220)
-    st.markdown("<br>", unsafe_allow_html=True)
-
+    # FOTOĞRAF KALDIRILDI
     st.title("🎛️ KONTROL PANELİ")
     st.markdown("---")
-
     c1, c2 = st.columns(2)
     bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024)
     bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0)
     c3, c4 = st.columns(2)
     bit_yil = c3.number_input("Bitiş Yılı", 2024, 2030, 2024)
     bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0)
-
     st.markdown("---")
     secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"])
     secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
-
     st.markdown("---")
     st.markdown("### 🚀 İŞLEM MERKEZİ")
     btn = st.button("ANALİZİ BAŞLAT")
@@ -264,12 +254,12 @@ if btn:
     else:
         status.error("Veri bulunamadı. Lütfen tekrar deneyin.")
 
-# --- DASHBOARD GÖRSELLEŞTİRME (ŞOV KISMI) ---
+# --- DASHBOARD (ŞOV KISMI) ---
 if st.session_state['df_sonuc'] is not None:
     df = st.session_state['df_sonuc']
     df = df.sort_values("TarihObj")
 
-    # 1. KPI KARTLARI (EN ÜSTTE)
+    # 1. KPI KARTLARI
     st.subheader("📊 Özet Performans (Son Dönem)")
     try:
         son_tarih = df["TarihObj"].max()
@@ -288,7 +278,6 @@ if st.session_state['df_sonuc'] is not None:
                 delta_val = row["Değer"] - prev_val
                 delta_pct = (delta_val / prev_val * 100) if prev_val != 0 else 0
 
-                # Format: 1.250.000 (Binlik Nokta)
                 val_fmt = f"{row['Değer']:,.0f}".replace(",", ".")
 
                 st.metric(
@@ -301,69 +290,99 @@ if st.session_state['df_sonuc'] is not None:
 
     st.markdown("---")
 
-    # 2. GELİŞMİŞ GRAFİKLER
-    st.subheader("📈 Detaylı Analiz Paneli")
+    # 2. GELİŞMİŞ GRAFİK SEKMELERİ
+    st.subheader("📈 Gelişmiş Analiz ve Simülasyon")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📉 Zaman Serisi", "📊 Karşılaştırma", "🍩 Pazar Payı", "📑 Detaylı Tablo"])
+    # YENİ EKLENEN 3D SİMÜLASYON SEKME 4 OLARAK GELDİ
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["📉 Trend (Area)", "📊 Sektör Payı (Bar)", "🪐 3D Simülasyon", "🍩 Pazar (Pie)", "📑 Veri Tablosu"])
 
-    # Grafik 1: Alan Grafiği (Zaman İçindeki Gelişim)
+    # 1. SEKME: AREA CHART (GRAFİK DÜZELTME EKLENDİ)
     with tab1:
         kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique(), key="ts_select")
-        df_chart = df[df["Kalem"] == kalem_sec]
+        df_chart = df[df["Kalem"] == kalem_sec].copy()
+
+        # --- KRİTİK DÜZELTME: Veriyi zorla float yapıyoruz ki grafik ters dönmesin ---
+        df_chart["Değer"] = df_chart["Değer"].astype(float)
 
         fig = px.area(df_chart, x="Dönem", y="Değer", color="Taraf",
                       title=f"📅 {kalem_sec} - Tarihsel Gelişim",
                       markers=True,
+                      # Y ekseninin otomatik ayarlanmasını sağla (Ters dönmeyi engeller)
+                      category_orders={"Dönem": sorted(df_chart["Dönem"].unique())},
                       color_discrete_sequence=["#FCB131", "#000000", "#555555", "#A6A6A6"])
+
+        # Y eksenini 0'dan başlat ve formatla
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="x unified")
-        fig.update_yaxes(tickformat=",")  # Plotly'de virgül binliktir
+        fig.update_yaxes(autorange=True, tickformat=",")
         st.plotly_chart(fig, use_container_width=True)
 
-    # Grafik 2: Bar Grafiği (Son Dönem Karşılaştırma)
+    # 2. SEKME: BAR CHART
     with tab2:
-        st.markdown("#### 🏁 Son Dönem Sektör Karşılaştırması")
-        df_son_chart = df[df["TarihObj"] == df["TarihObj"].max()]
+        df_son_chart = df[df["TarihObj"] == df["TarihObj"].max()].copy()
+        df_son_chart["Değer"] = df_son_chart["Değer"].astype(float)  # Float garanti
 
         fig_bar = px.bar(df_son_chart, x="Kalem", y="Değer", color="Taraf", barmode="group",
                          text_auto='.2s',
+                         title="Son Dönem Karşılaştırmalı Büyüklük",
                          color_discrete_sequence=["#FCB131", "#000000", "#555555"])
         fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        fig_bar.update_yaxes(autorange=True)
         st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Grafik 3: Donut (Pasta) Grafiği
+    # 3. SEKME: 3D SİMÜLASYON (YENİ İSTEK)
     with tab3:
-        st.markdown("#### 🍰 Sektör Dağılımı (Son Ay)")
+        st.markdown("#### 🪐 Finansal Veri Uzayı (3D)")
+        st.info("Bu grafik verileri 3 boyutlu uzayda simüle eder. Mouse ile döndürebilirsiniz.")
+
+        df_3d = df.copy()
+        df_3d["Değer"] = df_3d["Değer"].astype(float)
+
+        # 3D Scatter Plot
+        fig_3d = px.scatter_3d(df_3d, x='TarihObj', y='Taraf', z='Değer',
+                               size='Değer', color='Kalem',
+                               hover_data=['Dönem', 'Değer'],
+                               title="Zaman - Taraf - Tutar Uzayı",
+                               color_discrete_sequence=px.colors.qualitative.Dark24)
+
+        fig_3d.update_layout(
+            scene=dict(
+                xaxis_title='Zaman Ekseni',
+                yaxis_title='Taraf (Sektör/Kamu)',
+                zaxis_title='Tutar (TL)',
+                xaxis=dict(backgroundcolor="black", gridcolor="gray"),
+                yaxis=dict(backgroundcolor="black", gridcolor="gray"),
+                zaxis=dict(backgroundcolor="black", gridcolor="gray"),
+            ),
+            paper_bgcolor="#1E1E1E",  # Koyu mod
+            font=dict(color="white")
+        )
+        st.plotly_chart(fig_3d, use_container_width=True)
+
+    # 4. SEKME: PIE CHART
+    with tab4:
         col1, col2 = st.columns([1, 2])
         with col1:
-            pie_kalem = st.radio("Kalem Seç:", df["Kalem"].unique())
+            pie_kalem = st.radio("Kalem Seç:", df["Kalem"].unique(), key="pie_rad")
         with col2:
             df_pie = df[(df["TarihObj"] == df["TarihObj"].max()) & (df["Kalem"] == pie_kalem)]
             fig_pie = px.pie(df_pie, values="Değer", names="Taraf", hole=0.4,
+                             title=f"{pie_kalem} Dağılımı",
                              color_discrete_sequence=["#FCB131", "#000000", "#333333", "#666666"])
             fig_pie.update_traces(textinfo='percent+label')
             st.plotly_chart(fig_pie, use_container_width=True)
 
-    # Tablo ve İndirme (Binlik Nokta Formatlı)
-    with tab4:
-        st.markdown("#### 📋 Veri Seti")
-
-        # Pivot Tablo Oluştur
+    # 5. SEKME: TABLO
+    with tab5:
         pivot_df = df.pivot_table(index="Dönem", columns=["Kalem", "Taraf"], values="Değer", aggfunc="sum")
-
-        # GÖSTERİM İÇİN FORMATLAMA (Binlik Nokta)
-        # Lambda fonksiyonu ile her sayıyı string'e çevirip formatlıyoruz
         display_df = pivot_df.applymap(lambda x: f"{x:,.0f}".replace(",", ".") if pd.notnull(x) else "-")
 
         st.dataframe(display_df, use_container_width=True, height=400)
 
-        # Excel İndir (Ham Rakam Olarak)
         st.markdown("---")
         buffer = "BDDK_Rapor.xlsx"
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            # Ham veriyi sayı formatında indir (Excel'de işlem yapılabilsin diye)
             df.drop(columns=["TarihObj"]).to_excel(writer, sheet_name="Ham Veri", index=False)
-
-            # Pivotları da ayrı sheetlere koy
             for k in df["Kalem"].unique():
                 safe_name = "".join(c for c in k if c.isalnum())[:30]
                 df[df["Kalem"] == k].pivot(index="Dönem", columns="Taraf", values="Değer").to_excel(writer,
