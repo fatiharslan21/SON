@@ -38,21 +38,23 @@ st.markdown("""
         font-family: 'Segoe UI', sans-serif;
     }
 
-    /* Butonlar */
+    /* Butonlar - Siyah Zemin, Beyaz Yazı, Sarı Hover */
     div.stButton > button { 
         background-color: #000000; 
-        color: #FCB131 !important; 
+        color: #FFFFFF !important; /* YAZI RENGİ BEYAZ OLDU */
         font-weight: bold; 
         border-radius: 8px; 
         border: none; 
         width: 100%; 
-        padding: 10px;
+        padding: 12px;
+        font-size: 16px;
         transition: all 0.3s ease;
     }
     div.stButton > button:hover { 
         background-color: #333333; 
-        color: #FFFFFF !important;
+        color: #FCB131 !important; /* Hoverda Sarı */
         transform: scale(1.02);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
     }
 
     /* Metrik Kartları */
@@ -60,14 +62,17 @@ st.markdown("""
         background-color: #FFFFFF;
         padding: 15px;
         border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        border-left: 5px solid #FCB131;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border-top: 5px solid #FCB131;
     }
     [data-testid="stMetricLabel"] { font-weight: bold; color: #555; }
-    [data-testid="stMetricValue"] { color: #000000; font-weight: 800; }
+    [data-testid="stMetricValue"] { color: #000000; font-weight: 800; font-size: 26px !important; }
 
     /* Başlıklar */
     h1, h2, h3 { color: #d99000 !important; font-weight: 800; }
+
+    /* Tablo Güzelleştirme */
+    .dataframe { font-size: 14px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -160,7 +165,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                         try:
                             select_taraf.select_by_visible_text(taraf)
                         except:
-                            # Opsiyonel: Kısmi eşleşme
                             for opt in select_taraf.options:
                                 if taraf in opt.text:
                                     select_taraf.select_by_visible_text(opt.text)
@@ -173,55 +177,37 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
 
                         for veri in secilen_veriler:
                             conf = VERI_KONFIGURASYONU[veri]
-
-                            # Sekme Tıklama
                             try:
                                 driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                                time.sleep(1.5)  # Sekme geçişi için beklet
-                                soup = BeautifulSoup(driver.page_source, 'html.parser')  # HTML'i yenile
+                                time.sleep(1.5)
+                                soup = BeautifulSoup(driver.page_source, 'html.parser')
                             except:
                                 pass
 
-                            # --- DÜZELTİLMİŞ DEĞER ALMA (FIX) ---
-                            # Satırı bul
                             target_rows = soup.find_all("tr")
                             for row in target_rows:
                                 if conf['row_text'] in row.get_text():
-                                    # Şimdi hücreleri tarıyoruz ama rastgele değil!
                                     cols = row.find_all("td")
-
                                     found_val = None
                                     for col in cols:
-                                        # HÜCRENİN KİMLİĞİNE BAK: 'aria-describedby' veya 'headers'
-                                        # Bizim aradığımız ID (örn: grdRapor_Toplam) bu hücrede var mı?
-
-                                        cell_attrs = str(col.attrs)  # Tüm özellikleri string yap
-
+                                        cell_attrs = str(col.attrs)
                                         if conf['col_id'] in cell_attrs:
-                                            # İŞTE ARADIĞIMIZ DEĞER BU HÜCREDE!
                                             raw_text = col.get_text().strip()
-
-                                            # Temizle ve Kaydet
                                             clean_text = raw_text.replace('.', '').replace(',', '.')
                                             try:
                                                 found_val = float(clean_text)
                                             except:
                                                 found_val = 0.0
-                                            break  # Değeri bulduk, hücre döngüsünden çık
+                                            break
 
                                     if found_val is not None:
                                         data.append({
-                                            "Dönem": donem,
-                                            "Taraf": taraf,
-                                            "Kalem": veri,
-                                            "Değer": found_val,
-                                            # Grafik sıralaması için tarih objesi
+                                            "Dönem": donem, "Taraf": taraf, "Kalem": veri, "Değer": found_val,
                                             "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
                                         })
-                                    break  # Satır döngüsünden çık
+                                    break
 
                 except Exception as step_e:
-                    print(f"Adım hatası: {step_e}")
                     pass
 
                 current_step += 1
@@ -235,22 +221,29 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
     return pd.DataFrame(data)
 
 
-# --- ANA EKRAN ---
+# --- 5. ANA EKRAN VE DASHBOARD ---
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/e/e0/Vak%C4%B1fBank_logo.svg", width=200)  # Logo Şovu
+    # VakıfBank Logo URL (Temsili)
+    st.image("https://upload.wikimedia.org/wikipedia/commons/e/e0/Vak%C4%B1fBank_logo.svg", width=220)
+    st.markdown("<br>", unsafe_allow_html=True)
+
     st.title("🎛️ KONTROL PANELİ")
     st.markdown("---")
+
     c1, c2 = st.columns(2)
     bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024)
     bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0)
     c3, c4 = st.columns(2)
     bit_yil = c3.number_input("Bitiş Yılı", 2024, 2030, 2024)
     bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0)
+
     st.markdown("---")
     secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"])
     secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
+
     st.markdown("---")
-    btn = st.button("🚀 ANALİZİ BAŞLAT")
+    st.markdown("### 🚀 İŞLEM MERKEZİ")
+    btn = st.button("ANALİZİ BAŞLAT")
 
 st.title("🏦 BDDK Finansal Analiz Pro")
 
@@ -259,34 +252,32 @@ if 'df_sonuc' not in st.session_state:
 
 if btn:
     status = st.empty()
-    st.session_state['df_sonuc'] = None  # Reset
+    st.session_state['df_sonuc'] = None
     df = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status)
 
     if not df.empty:
         st.session_state['df_sonuc'] = df
         status.success("✅ Veriler Başarıyla Çekildi!")
-        st.balloons()  # ŞOV ZAMANI: KONFETİLER!
+        st.balloons()
         time.sleep(1)
         st.rerun()
     else:
         status.error("Veri bulunamadı. Lütfen tekrar deneyin.")
 
-# --- DASHBOARD (Veri Varsa) ---
+# --- DASHBOARD GÖRSELLEŞTİRME (ŞOV KISMI) ---
 if st.session_state['df_sonuc'] is not None:
     df = st.session_state['df_sonuc']
-    df = df.sort_values("TarihObj")  # Tarihe göre sırala
+    df = df.sort_values("TarihObj")
 
-    # 1. KPI KARTLARI (ŞOV KISMI)
+    # 1. KPI KARTLARI (EN ÜSTTE)
     st.subheader("📊 Özet Performans (Son Dönem)")
     try:
         son_tarih = df["TarihObj"].max()
         df_son = df[df["TarihObj"] == son_tarih]
 
-        # En fazla 4 kolon göster
-        cols = st.columns(min(len(df_son), 4))
+        cols = st.columns(4)
         for i, (idx, row) in enumerate(df_son.head(4).iterrows()):
-            with cols[i]:
-                # Varsa önceki ayı bul
+            with cols[i % 4]:
                 prev_val = 0
                 df_prev = df[df["TarihObj"] < son_tarih]
                 if not df_prev.empty:
@@ -297,39 +288,82 @@ if st.session_state['df_sonuc'] is not None:
                 delta_val = row["Değer"] - prev_val
                 delta_pct = (delta_val / prev_val * 100) if prev_val != 0 else 0
 
+                # Format: 1.250.000 (Binlik Nokta)
+                val_fmt = f"{row['Değer']:,.0f}".replace(",", ".")
+
                 st.metric(
-                    label=f"{row['Taraf']} - {row['Kalem'][:15]}...",
-                    value=f"{row['Değer']:,.0f}",
-                    delta=f"%{delta_pct:.1f}"
+                    label=f"{row['Taraf']}",
+                    value=f"{val_fmt}",
+                    delta=f"%{delta_pct:.1f} ({row['Kalem'][:15]}...)"
                 )
     except:
         pass
 
     st.markdown("---")
 
-    # 2. GRAFİK VE TABLOLAR
-    tab1, tab2, tab3 = st.tabs(["📈 Trend Analizi", "📑 Detaylı Tablo", "📥 Rapor İndir"])
+    # 2. GELİŞMİŞ GRAFİKLER
+    st.subheader("📈 Detaylı Analiz Paneli")
 
+    tab1, tab2, tab3, tab4 = st.tabs(["📉 Zaman Serisi", "📊 Karşılaştırma", "🍩 Pazar Payı", "📑 Detaylı Tablo"])
+
+    # Grafik 1: Alan Grafiği (Zaman İçindeki Gelişim)
     with tab1:
-        kalem = st.selectbox("Grafik Kalemi Seçiniz:", df["Kalem"].unique())
-        df_chart = df[df["Kalem"] == kalem]
+        kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique(), key="ts_select")
+        df_chart = df[df["Kalem"] == kalem_sec]
 
-        # Area Chart (Daha Dolgun Görünüm)
         fig = px.area(df_chart, x="Dönem", y="Değer", color="Taraf",
-                      title=f"{kalem} Gelişimi",
+                      title=f"📅 {kalem_sec} - Tarihsel Gelişim",
                       markers=True,
-                      color_discrete_sequence=["#FCB131", "#000000", "#A6A6A6"])
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                      color_discrete_sequence=["#FCB131", "#000000", "#555555", "#A6A6A6"])
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="x unified")
+        fig.update_yaxes(tickformat=",")  # Plotly'de virgül binliktir
         st.plotly_chart(fig, use_container_width=True)
 
+    # Grafik 2: Bar Grafiği (Son Dönem Karşılaştırma)
     with tab2:
-        pivot_df = df.pivot_table(index="Dönem", columns=["Kalem", "Taraf"], values="Değer", aggfunc="sum")
-        st.dataframe(pivot_df, use_container_width=True)
+        st.markdown("#### 🏁 Son Dönem Sektör Karşılaştırması")
+        df_son_chart = df[df["TarihObj"] == df["TarihObj"].max()]
 
+        fig_bar = px.bar(df_son_chart, x="Kalem", y="Değer", color="Taraf", barmode="group",
+                         text_auto='.2s',
+                         color_discrete_sequence=["#FCB131", "#000000", "#555555"])
+        fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Grafik 3: Donut (Pasta) Grafiği
     with tab3:
+        st.markdown("#### 🍰 Sektör Dağılımı (Son Ay)")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            pie_kalem = st.radio("Kalem Seç:", df["Kalem"].unique())
+        with col2:
+            df_pie = df[(df["TarihObj"] == df["TarihObj"].max()) & (df["Kalem"] == pie_kalem)]
+            fig_pie = px.pie(df_pie, values="Değer", names="Taraf", hole=0.4,
+                             color_discrete_sequence=["#FCB131", "#000000", "#333333", "#666666"])
+            fig_pie.update_traces(textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    # Tablo ve İndirme (Binlik Nokta Formatlı)
+    with tab4:
+        st.markdown("#### 📋 Veri Seti")
+
+        # Pivot Tablo Oluştur
+        pivot_df = df.pivot_table(index="Dönem", columns=["Kalem", "Taraf"], values="Değer", aggfunc="sum")
+
+        # GÖSTERİM İÇİN FORMATLAMA (Binlik Nokta)
+        # Lambda fonksiyonu ile her sayıyı string'e çevirip formatlıyoruz
+        display_df = pivot_df.applymap(lambda x: f"{x:,.0f}".replace(",", ".") if pd.notnull(x) else "-")
+
+        st.dataframe(display_df, use_container_width=True, height=400)
+
+        # Excel İndir (Ham Rakam Olarak)
+        st.markdown("---")
         buffer = "BDDK_Rapor.xlsx"
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            # Ham veriyi sayı formatında indir (Excel'de işlem yapılabilsin diye)
             df.drop(columns=["TarihObj"]).to_excel(writer, sheet_name="Ham Veri", index=False)
+
+            # Pivotları da ayrı sheetlere koy
             for k in df["Kalem"].unique():
                 safe_name = "".join(c for c in k if c.isalnum())[:30]
                 df[df["Kalem"] == k].pivot(index="Dönem", columns="Taraf", values="Değer").to_excel(writer,
@@ -337,8 +371,8 @@ if st.session_state['df_sonuc'] is not None:
 
         with open(buffer, "rb") as f:
             st.download_button(
-                label="📥 Excel Raporunu İndir",
+                label="📥 EXCEL RAPORUNU İNDİR (Tam Formatlı)",
                 data=f,
-                file_name="Vakif_Analiz.xlsx",
+                file_name="Vakif_Analiz_Pro.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
