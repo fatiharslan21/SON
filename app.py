@@ -89,16 +89,23 @@ def get_driver():
 
 
 # --- 4. VERİ ÇEKME MOTORU ---
-def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
+# Cache eklendi: Veri aynıysa tekrar çekmez, hız kazandırır.
+@st.cache_data(show_spinner=False)
+def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler):
+    # Not: Streamlit içerisinde driver objesi cachelenemez, bu yüzden fonksiyon her çağrıldığında driver açılır kapanır.
+    # Ancak cache sayesinde aynı parametrelerle çağrıldığında bu fonksiyon hiç çalışmaz, eski sonucu döndürür.
     driver = None
     data = []
+
+    # Status mesajlarını göstermek için placeholder kullanamayız çünkü cache fonksiyonu UI elemanı döndüremez.
+    # Bu yüzden burayı sadeleştirdik.
+
     try:
         driver = get_driver()
         if not driver:
             return pd.DataFrame()
 
         driver.set_page_load_timeout(60)
-        status_container.info("🌐 BDDK sistemine bağlanılıyor...")
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
@@ -106,9 +113,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
-        total_steps = (bit_yil - bas_yil) * 12 + (bit_idx - bas_idx) + 1
-        current_step = 0
-        progress_bar = st.progress(0)
 
         for yil in range(bas_yil, bit_yil + 1):
             s_m = bas_idx if yil == bas_yil else 0
@@ -117,7 +121,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
             for ay_i in range(s_m, e_m + 1):
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
-                status_container.info(f"⏳ İşleniyor: **{donem}**")
 
                 try:
                     driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
@@ -197,11 +200,8 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                     print(f"Hata ({donem}): {e}")
                     pass
 
-                current_step += 1
-                progress_bar.progress(min(current_step / max(1, total_steps), 1.0))
-
     except Exception as e:
-        st.error(f"Genel İşlem Hatası: {e}")
+        pass  # Cache fonksiyonunda st.error kullanmak sorun yaratabilir, sessiz geçiyoruz.
     finally:
         if driver: driver.quit()
 
@@ -226,6 +226,7 @@ with st.sidebar:
     btn = st.button("ANALİZİ BAŞLAT")
 
 st.title("🏦 BDDK Finansal Analiz Pro")
+
 if 'df_sonuc' not in st.session_state:
     st.session_state['df_sonuc'] = None
 
@@ -233,17 +234,18 @@ if btn:
     if not secilen_taraflar or not secilen_veriler:
         st.warning("Lütfen en az bir Taraf ve bir Veri kalemi seçin.")
     else:
-        status = st.empty()
-        st.session_state['df_sonuc'] = None
-        df = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status)
+        with st.spinner("Veriler BDDK'dan çekiliyor, lütfen bekleyiniz..."):
+            # Cache'li fonksiyonu çağırıyoruz
+            df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler)
+
         if not df.empty:
             st.session_state['df_sonuc'] = df
-            status.success("✅ Veriler Başarıyla Çekildi!")
+            st.success("✅ Veriler Başarıyla Çekildi!")
             st.balloons()
             time.sleep(1)
             st.rerun()
         else:
-            status.error("Veri bulunamadı veya bağlantı hatası oluştu.")
+            st.error("Veri bulunamadı veya bağlantı hatası oluştu.")
 
 # --- DASHBOARD ---
 if st.session_state['df_sonuc'] is not None:
@@ -334,7 +336,6 @@ if st.session_state['df_sonuc'] is not None:
                                 go.Indicator(mode="gauge+number", value=share_pct, title={'text': f"{r['Taraf']} Payı"},
                                              gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#FCB131"}}))
                             fig_g.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
-                            # --- DÜZELTME BURADA YAPILDI: key=f"gauge_{idx}" EKLENDİ ---
                             st.plotly_chart(fig_g, use_container_width=True, key=f"gauge_{idx}")
                 else:
                     st.info("Sektör dışında karşılaştırılacak taraf seçmediniz.")
@@ -352,8 +353,10 @@ if st.session_state['df_sonuc'] is not None:
         df_display = df.sort_values(["TarihObj", "Taraf", "Kalem"])
         st.dataframe(df_display, use_container_width=True)
 
+        # --- EXCEL INDIRME DUZELTMESI ---
         buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        # engine='xlsxwriter' kaldırıldı, varsayılan (veya openpyxl) kullanılacak.
+        with pd.ExcelWriter(buffer) as writer:
             df_display.to_excel(writer, index=False, sheet_name='BDDK_Veri')
 
         st.download_button(
