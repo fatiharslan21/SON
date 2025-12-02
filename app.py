@@ -14,34 +14,77 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from bs4 import BeautifulSoup
 import plotly.express as px
+import plotly.graph_objects as go
 import time
 import sys
 import os
 
-# --- AYARLAR ---
-st.set_page_config(page_title="BDDK Analiz", layout="wide", page_icon="🏦")
+# --- 1. AYARLAR VE TASARIM ---
+st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦")
 
-# CSS
+# VAKIFBANK TEMASI VE ŞIK GÖRÜNÜM
 st.markdown("""
 <style>
-    .stApp { background-color: #FFFFFF; }
-    [data-testid="stSidebar"] { background-color: #FCB131; }
-    [data-testid="stSidebar"] * { color: #000000 !important; font-weight: bold; }
-    div.stButton > button { background-color: #FCB131; color: black; border: 2px solid black; width: 100%; }
+    /* Genel Arka Plan */
+    .stApp { background-color: #F9F9F9; }
+
+    /* Yan Menü - Vakıf Sarı */
+    [data-testid="stSidebar"] { 
+        background-color: #FCB131; 
+        border-right: 1px solid #e0e0e0;
+    }
+    [data-testid="stSidebar"] * { 
+        color: #000000 !important; 
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    /* Butonlar */
+    div.stButton > button { 
+        background-color: #000000; 
+        color: #FCB131 !important; 
+        font-weight: bold; 
+        border-radius: 8px; 
+        border: none; 
+        width: 100%; 
+        padding: 10px;
+        transition: all 0.3s ease;
+    }
+    div.stButton > button:hover { 
+        background-color: #333333; 
+        color: #FFFFFF !important;
+        transform: scale(1.02);
+    }
+
+    /* Metrik Kartları */
+    [data-testid="stMetric"] {
+        background-color: #FFFFFF;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        border-left: 5px solid #FCB131;
+    }
+    [data-testid="stMetricLabel"] { font-weight: bold; color: #555; }
+    [data-testid="stMetricValue"] { color: #000000; font-weight: 800; }
+
+    /* Başlıklar */
+    h1, h2, h3 { color: #d99000 !important; font-weight: 800; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIG ---
+# --- 2. CONFIG ---
 AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
               "Aralık"]
 TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
 
+# col_id: HTML içinde veriyi tutan hücrenin özel kimliği
 VERI_KONFIGURASYONU = {
     "📌 TOPLAM AKTİFLER": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
     "📌 TOPLAM ÖZKAYNAKLAR": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR",
                              "col_id": "grdRapor_Toplam"},
     "⚠️ Takipteki Alacaklar": {"tab": "tabloListesiItem-1", "row_text": "Takipteki Alacaklar",
                                "col_id": "grdRapor_Toplam"},
+    "📊 Sermaye Yeterliliği Rasyosu": {"tab": "#tabloListesiItem-12", "row_text": "Sermaye Yeterliliği Standart Rasyosu",
+                                      "col_attr": "grdRapor_Toplam"},
     "💰 DÖNEM NET KARI": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)",
                          "col_id": "grdRapor_Toplam"},
     "🏦 Toplam Krediler": {"tab": "tabloListesiItem-3", "row_text": "Toplam Krediler", "col_id": "grdRapor_Toplam"},
@@ -52,9 +95,10 @@ VERI_KONFIGURASYONU = {
 }
 
 
-# --- DRIVER ---
+# --- 3. DRIVER YÖNETİMİ ---
 def get_driver():
     if sys.platform == "linux":
+        # Cloud (Firefox)
         options = FirefoxOptions()
         options.add_argument("--headless")
         options.binary_location = "/usr/bin/firefox"
@@ -64,12 +108,13 @@ def get_driver():
             service = FirefoxService("/usr/local/bin/geckodriver")
         return webdriver.Firefox(service=service, options=options)
     else:
+        # Local (Chrome)
         options = ChromeOptions()
-        # options.add_argument("--headless") # Localde görmek için kapattık
         service = ChromeService(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
 
 
+# --- 4. VERİ ÇEKME MOTORU ---
 def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
     driver = None
     data = []
@@ -77,12 +122,11 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
     try:
         driver = get_driver()
         driver.set_page_load_timeout(60)
-        status_container.info("🌐 Siteye bağlanılıyor...")
+        status_container.info("🌐 BDDK sunucularına bağlanılıyor...")
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
-        # Sayfanın yüklenmesini bekle
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
-        time.sleep(3)  # Garanti bekleme
+        time.sleep(3)
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
@@ -97,101 +141,96 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
             for ay_i in range(s_m, e_m + 1):
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
-                status_container.info(f"⏳ Veri Çekiliyor: **{donem}**")
+                status_container.info(f"⏳ İşleniyor: **{donem}**")
 
-                # --- YENİ YÖNTEM: GİZLİ ELEMENTİ AÇ VE TIKLA ---
                 try:
-                    # 1. YIL SEÇİMİ
-                    # Gizli olan <select> elementini görünür yap
+                    # 1. YIL SEÇİMİ (Mekanik)
                     driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
-                    select_yil = Select(driver.find_element(By.ID, "ddlYil"))
-                    select_yil.select_by_visible_text(str(yil))
-                    time.sleep(2)  # Postback bekle
+                    Select(driver.find_element(By.ID, "ddlYil")).select_by_visible_text(str(yil))
+                    time.sleep(2)
 
                     # 2. AY SEÇİMİ
                     driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
-                    select_ay = Select(driver.find_element(By.ID, "ddlAy"))
-                    select_ay.select_by_visible_text(ay_str)
-                    time.sleep(4)  # Tablo güncellemesi için uzun bekle
+                    Select(driver.find_element(By.ID, "ddlAy")).select_by_visible_text(ay_str)
+                    time.sleep(4)
 
                     # 3. TARAF SEÇİMİ
                     for taraf in secilen_taraflar:
                         driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
                         select_taraf = Select(driver.find_element(By.ID, "ddlTaraf"))
 
-                        # Taraf ismi eşleşmesi (Boşlukları temizleyerek)
                         try:
-                            # Tam eşleşme dene
                             select_taraf.select_by_visible_text(taraf)
                         except:
-                            # Bulamazsa options içinde ara
-                            found = False
+                            # Opsiyonel: Kısmi eşleşme
                             for opt in select_taraf.options:
                                 if taraf in opt.text:
                                     select_taraf.select_by_visible_text(opt.text)
-                                    found = True
                                     break
 
-                        time.sleep(3)  # Veri gelmesini bekle
+                        time.sleep(3)
 
-                        # 4. VERİ ÇEKME (BEAUTIFUL SOUP İLE)
-                        # Sayfanın o anki HTML'ini al
+                        # HTML ÇEKME
                         soup = BeautifulSoup(driver.page_source, 'html.parser')
 
                         for veri in secilen_veriler:
                             conf = VERI_KONFIGURASYONU[veri]
 
-                            # İlgili Sekmeye Geç (Gerekirse)
+                            # Sekme Tıklama
                             try:
-                                # Sekme tıkla
                                 driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                                time.sleep(1)
-                                # HTML'i güncelle (Sekme değişti çünkü)
-                                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                                time.sleep(1.5)  # Sekme geçişi için beklet
+                                soup = BeautifulSoup(driver.page_source, 'html.parser')  # HTML'i yenile
                             except:
                                 pass
 
-                            # Satırı bul (Soup ile)
-                            # "text" içeren tüm tr'leri bul
+                            # --- DÜZELTİLMİŞ DEĞER ALMA (FIX) ---
+                            # Satırı bul
                             target_rows = soup.find_all("tr")
                             for row in target_rows:
                                 if conf['row_text'] in row.get_text():
-                                    # Hücreleri al
+                                    # Şimdi hücreleri tarıyoruz ama rastgele değil!
                                     cols = row.find_all("td")
-                                    # Genelde son sütun veya aria-describedby olan sütun değerdir
-                                    # Basit mantık: Sayı içeren ilk mantıklı hücreyi al
+
+                                    found_val = None
                                     for col in cols:
-                                        text = col.get_text().strip()
-                                        # Sayısal mı kontrol et (1.250,00 formatı)
-                                        clean_text = text.replace('.', '').replace(',', '.')
-                                        if clean_text.replace('-', '').isdigit() or (
-                                                clean_text.replace('-', '').replace('.', '', 1).isdigit() and len(
-                                                clean_text) > 0):
+                                        # HÜCRENİN KİMLİĞİNE BAK: 'aria-describedby' veya 'headers'
+                                        # Bizim aradığımız ID (örn: grdRapor_Toplam) bu hücrede var mı?
 
-                                            # Eğer sayı çok küçükse (Sıra nosu gibi) ve asıl değer değilse atla
-                                            if len(text) < 2 and float(clean_text) < 100:
-                                                continue
+                                        cell_attrs = str(col.attrs)  # Tüm özellikleri string yap
 
-                                            data.append({
-                                                "Dönem": donem, "Taraf": taraf,
-                                                "Kalem": veri, "Değer": float(clean_text)
-                                            })
-                                            break  # İlk anlamlı sayıyı alınca çık
-                                    break  # Satırı bulunca çık
+                                        if conf['col_id'] in cell_attrs:
+                                            # İŞTE ARADIĞIMIZ DEĞER BU HÜCREDE!
+                                            raw_text = col.get_text().strip()
+
+                                            # Temizle ve Kaydet
+                                            clean_text = raw_text.replace('.', '').replace(',', '.')
+                                            try:
+                                                found_val = float(clean_text)
+                                            except:
+                                                found_val = 0.0
+                                            break  # Değeri bulduk, hücre döngüsünden çık
+
+                                    if found_val is not None:
+                                        data.append({
+                                            "Dönem": donem,
+                                            "Taraf": taraf,
+                                            "Kalem": veri,
+                                            "Değer": found_val,
+                                            # Grafik sıralaması için tarih objesi
+                                            "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
+                                        })
+                                    break  # Satır döngüsünden çık
 
                 except Exception as step_e:
                     print(f"Adım hatası: {step_e}")
-                    # Hata olsa bile devam et
                     pass
 
                 current_step += 1
                 progress_bar.progress(current_step / max(1, total_steps))
 
     except Exception as e:
-        st.error(f"GENEL HATA: {e}")
-        if driver:
-            driver.save_screenshot("debug_error.png")
-            st.image("debug_error.png")
+        st.error(f"Sunucu Hatası: {e}")
     finally:
         if driver: driver.quit()
 
@@ -200,41 +239,108 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
 
 # --- ANA EKRAN ---
 with st.sidebar:
-    st.title("🎛️ PANEL")
-    c1, c2 = st.columns(2)
-    bas_yil = c1.number_input("Başlangıç", 2024, 2030, 2024)
-    bas_ay = c1.selectbox("Ay", AY_LISTESI, index=0)
-    c3, c4 = st.columns(2)
-    bit_yil = c3.number_input("Bitiş", 2024, 2030, 2024)
-    bit_ay = c4.selectbox("Ay ", AY_LISTESI, index=0)
+    st.image("https://upload.wikimedia.org/wikipedia/commons/e/e0/Vak%C4%B1fBank_logo.svg", width=200)  # Logo Şovu
+    st.title("🎛️ KONTROL PANELİ")
     st.markdown("---")
-    secilen_taraflar = st.multiselect("Taraf", TARAF_SECENEKLERI, default=["Sektör"])
-    secilen_veriler = st.multiselect("Veri", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
-    btn = st.button("🚀 BAŞLAT")
+    c1, c2 = st.columns(2)
+    bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024)
+    bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0)
+    c3, c4 = st.columns(2)
+    bit_yil = c3.number_input("Bitiş Yılı", 2024, 2030, 2024)
+    bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0)
+    st.markdown("---")
+    secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"])
+    secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
+    st.markdown("---")
+    btn = st.button("🚀 ANALİZİ BAŞLAT")
 
-st.title("🏦 BDDK Analiz")
+st.title("🏦 BDDK Finansal Analiz Pro")
+
+if 'df_sonuc' not in st.session_state:
+    st.session_state['df_sonuc'] = None
 
 if btn:
     status = st.empty()
+    st.session_state['df_sonuc'] = None  # Reset
     df = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status)
 
     if not df.empty:
-        status.success("✅ Veriler Çekildi!")
-        tab1, tab2 = st.tabs(["📊 Grafik", "📥 Excel"])
-
-        with tab1:
-            try:
-                kalem = st.selectbox("Grafik:", df["Kalem"].unique())
-                df_c = df[df["Kalem"] == kalem]
-                st.plotly_chart(px.line(df_c, x="Dönem", y="Değer", color="Taraf", markers=True))
-            except:
-                pass
-
-        with tab2:
-            buffer = "BDDK.xlsx"
-            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                df.to_excel(writer, sheet_name="Data", index=False)
-            with open(buffer, "rb") as f:
-                st.download_button("İndir", f, file_name="BDDK.xlsx")
+        st.session_state['df_sonuc'] = df
+        status.success("✅ Veriler Başarıyla Çekildi!")
+        st.balloons()  # ŞOV ZAMANI: KONFETİLER!
+        time.sleep(1)
+        st.rerun()
     else:
         status.error("Veri bulunamadı. Lütfen tekrar deneyin.")
+
+# --- DASHBOARD (Veri Varsa) ---
+if st.session_state['df_sonuc'] is not None:
+    df = st.session_state['df_sonuc']
+    df = df.sort_values("TarihObj")  # Tarihe göre sırala
+
+    # 1. KPI KARTLARI (ŞOV KISMI)
+    st.subheader("📊 Özet Performans (Son Dönem)")
+    try:
+        son_tarih = df["TarihObj"].max()
+        df_son = df[df["TarihObj"] == son_tarih]
+
+        # En fazla 4 kolon göster
+        cols = st.columns(min(len(df_son), 4))
+        for i, (idx, row) in enumerate(df_son.head(4).iterrows()):
+            with cols[i]:
+                # Varsa önceki ayı bul
+                prev_val = 0
+                df_prev = df[df["TarihObj"] < son_tarih]
+                if not df_prev.empty:
+                    prev_rows = df_prev[(df_prev["Kalem"] == row["Kalem"]) & (df_prev["Taraf"] == row["Taraf"])]
+                    if not prev_rows.empty:
+                        prev_val = prev_rows.iloc[-1]["Değer"]
+
+                delta_val = row["Değer"] - prev_val
+                delta_pct = (delta_val / prev_val * 100) if prev_val != 0 else 0
+
+                st.metric(
+                    label=f"{row['Taraf']} - {row['Kalem'][:15]}...",
+                    value=f"{row['Değer']:,.0f}",
+                    delta=f"%{delta_pct:.1f}"
+                )
+    except:
+        pass
+
+    st.markdown("---")
+
+    # 2. GRAFİK VE TABLOLAR
+    tab1, tab2, tab3 = st.tabs(["📈 Trend Analizi", "📑 Detaylı Tablo", "📥 Rapor İndir"])
+
+    with tab1:
+        kalem = st.selectbox("Grafik Kalemi Seçiniz:", df["Kalem"].unique())
+        df_chart = df[df["Kalem"] == kalem]
+
+        # Area Chart (Daha Dolgun Görünüm)
+        fig = px.area(df_chart, x="Dönem", y="Değer", color="Taraf",
+                      title=f"{kalem} Gelişimi",
+                      markers=True,
+                      color_discrete_sequence=["#FCB131", "#000000", "#A6A6A6"])
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        pivot_df = df.pivot_table(index="Dönem", columns=["Kalem", "Taraf"], values="Değer", aggfunc="sum")
+        st.dataframe(pivot_df, use_container_width=True)
+
+    with tab3:
+        buffer = "BDDK_Rapor.xlsx"
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            df.drop(columns=["TarihObj"]).to_excel(writer, sheet_name="Ham Veri", index=False)
+            for k in df["Kalem"].unique():
+                safe_name = "".join(c for c in k if c.isalnum())[:30]
+                df[df["Kalem"] == k].pivot(index="Dönem", columns="Taraf", values="Değer").to_excel(writer,
+                                                                                                    sheet_name=safe_name)
+
+        with open(buffer, "rb") as f:
+            st.download_button(
+                label="📥 Excel Raporunu İndir",
+                data=f,
+                file_name="Vakif_Analiz.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
