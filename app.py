@@ -59,25 +59,20 @@ st.markdown("""
 # --- 2. CONFIG ---
 AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
               "Aralık"]
-TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu"]
+TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
 
+# DÜZELTME NOTU: Bazı satırlarda 'col_attr' yazmışsınız, kod aşağıda 'col_id' arıyor.
+# Bu yüzden onları 'col_id' olarak düzelttim ki KeyError almayın.
 VERI_KONFIGURASYONU = {
     "📌 Toplam Aktifler": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
-    "📌 Toplam Özkaynaklar": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR",
-                             "col_id": "grdRapor_Toplam"},
-    "⚠️ Takipteki Alacaklar": {"tab": "tabloListesiItem-1", "row_text": "Takipteki Alacaklar",
-                               "col_id": "grdRapor_Toplam"},
-    "💰 Dönem Net Kârı": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)",
-                         "col_id": "grdRapor_Toplam"},
-    "📊 Sermaye Yeterliliği Rasyosu": {"tab": "#tabloListesiItem-12", "row_text": "Sermaye Yeterliliği Standart Rasyosu",
-                                      "col_attr": "grdRapor_Toplam"},
-    "💳 Bireysel Kredi Kartları": {"tab": "#tabloListesiItem-4", "row_text": "Bireysel Kredi Kartları (10+11)",
-                                  "col_attr": "grdRapor_Toplam"},
+    "📌 Toplam Özkaynaklar": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR", "col_id": "grdRapor_Toplam"},
+    "⚠️ Takipteki Alacaklar": {"tab": "tabloListesiItem-1", "row_text": "Takipteki Alacaklar", "col_id": "grdRapor_Toplam"},
+    "💰 Dönem Net Kârı": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)", "col_id": "grdRapor_Toplam"},
+    "📊 Sermaye Yeterliliği Rasyosu": {"tab": "tabloListesiItem-12", "row_text": "Sermaye Yeterliliği Standart Rasyosu", "col_id": "grdRapor_Toplam"},
+    "💳 Bireysel Kredi Kartları": {"tab": "tabloListesiItem-4", "row_text": "Bireysel Kredi Kartları (10+11)", "col_id": "grdRapor_Toplam"},
     "🏦 Toplam Krediler": {"tab": "tabloListesiItem-3", "row_text": "Toplam Krediler", "col_id": "grdRapor_Toplam"},
-    "🏠 Tüketici Kredileri": {"tab": "tabloListesiItem-4", "row_text": "Tüketici Kredileri",
-                             "col_id": "grdRapor_Toplam"},
-    "🏭 KOBİ Kredileri": {"tab": "tabloListesiItem-6", "row_text": "Toplam KOBİ Kredileri",
-                         "col_id": "grdRapor_NakdiKrediToplam"}
+    "🏠 Tüketici Kredileri": {"tab": "tabloListesiItem-4", "row_text": "Tüketici Kredileri", "col_id": "grdRapor_Toplam"},
+    "🏭 KOBİ Kredileri": {"tab": "tabloListesiItem-6", "row_text": "Toplam KOBİ Kredileri", "col_id": "grdRapor_NakdiKrediToplam"}
 }
 
 
@@ -199,6 +194,7 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
                                     continue
 
                                 ad = row.find("td", {"aria-describedby": "grdRapor_Ad"})
+                                # Düzeltme: Burada kod col_id arıyor, config'de col_attr olursa hata verirdi.
                                 toplam = row.find("td", {"aria-describedby": conf['col_id']})
 
                                 if ad and toplam:
@@ -246,7 +242,8 @@ with st.sidebar:
     bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0, key="sb_bit_ay")
     st.markdown("---")
     secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"], key="sb_taraflar")
-    secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"],
+    # HATA BURADAYDI: default değeri sözlükteki anahtarla birebir (harf büyüklüğü dahil) aynı olmalı.
+    secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 Toplam Aktifler"],
                                      key="sb_veriler")
     st.markdown("---")
     st.markdown("### 🚀 İŞLEM MERKEZİ")
