@@ -89,16 +89,10 @@ def get_driver():
 
 
 # --- 4. VERİ ÇEKME MOTORU ---
-# Cache eklendi: Veri aynıysa tekrar çekmez, hız kazandırır.
 @st.cache_data(show_spinner=False)
 def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler):
-    # Not: Streamlit içerisinde driver objesi cachelenemez, bu yüzden fonksiyon her çağrıldığında driver açılır kapanır.
-    # Ancak cache sayesinde aynı parametrelerle çağrıldığında bu fonksiyon hiç çalışmaz, eski sonucu döndürür.
     driver = None
     data = []
-
-    # Status mesajlarını göstermek için placeholder kullanamayız çünkü cache fonksiyonu UI elemanı döndüremez.
-    # Bu yüzden burayı sadeleştirdik.
 
     try:
         driver = get_driver()
@@ -197,11 +191,10 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
                                             "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
                                         })
                 except Exception as e:
-                    print(f"Hata ({donem}): {e}")
                     pass
 
     except Exception as e:
-        pass  # Cache fonksiyonunda st.error kullanmak sorun yaratabilir, sessiz geçiyoruz.
+        pass
     finally:
         if driver: driver.quit()
 
@@ -235,7 +228,6 @@ if btn:
         st.warning("Lütfen en az bir Taraf ve bir Veri kalemi seçin.")
     else:
         with st.spinner("Veriler BDDK'dan çekiliyor, lütfen bekleyiniz..."):
-            # Cache'li fonksiyonu çağırıyoruz
             df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler)
 
         if not df.empty:
@@ -250,6 +242,8 @@ if btn:
 # --- DASHBOARD ---
 if st.session_state['df_sonuc'] is not None:
     df = st.session_state['df_sonuc']
+    # Çoklamaları Temizle
+    df = df.drop_duplicates(subset=["Dönem", "Taraf", "Kalem"])
     df = df.sort_values("TarihObj")
 
     st.subheader("📊 Özet Performans (Son Dönem)")
@@ -276,7 +270,8 @@ if st.session_state['df_sonuc'] is not None:
         st.error(f"Metrik hatası: {e}")
 
     st.markdown("---")
-    tab1, tab2, tab3, tab4 = st.tabs(["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📊 Pazar Payı", "📑 Detaylı Tablo"])
+    # Pazar Payı kaldırıldı
+    tab1, tab2, tab3 = st.tabs(["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📑 Detaylı Tablo"])
 
     with tab1:
         kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
@@ -289,7 +284,7 @@ if st.session_state['df_sonuc'] is not None:
 
         fig.update_xaxes(categoryorder='array', categoryarray=df_chart["Dönem"].unique())
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="x unified")
-        fig.update_yaxes(tickformat=",")
+        fig.update_yaxes(tickformat=",")  # Grafikte binlik ayracı
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
@@ -318,46 +313,27 @@ if st.session_state['df_sonuc'] is not None:
                 st.plotly_chart(fig_sim, use_container_width=True)
 
     with tab3:
-        st.markdown("#### 📊 Pazar Payı Analizi")
-        if "Sektör" in df["Taraf"].unique() and len(df["Taraf"].unique()) > 1:
-            kalem_pie = st.selectbox("Payı İncelenecek Kalem:", df["Kalem"].unique(), key="share_select")
-            df_last = df[(df["TarihObj"] == df["TarihObj"].max()) & (df["Kalem"] == kalem_pie)]
-            sektor_row = df_last[df_last["Taraf"] == "Sektör"]
-            if not sektor_row.empty:
-                sektor_val = sektor_row.iloc[0]["Değer"]
-                other_rows = df_last[df_last["Taraf"] != "Sektör"]
-
-                if not other_rows.empty:
-                    cols_g = st.columns(len(other_rows))
-                    for idx, (i, r) in enumerate(other_rows.iterrows()):
-                        share_pct = (r["Değer"] / sektor_val) * 100 if sektor_val > 0 else 0
-                        with cols_g[idx % 3]:
-                            fig_g = go.Figure(
-                                go.Indicator(mode="gauge+number", value=share_pct, title={'text': f"{r['Taraf']} Payı"},
-                                             gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#FCB131"}}))
-                            fig_g.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
-                            st.plotly_chart(fig_g, use_container_width=True, key=f"gauge_{idx}")
-                else:
-                    st.info("Sektör dışında karşılaştırılacak taraf seçmediniz.")
-            else:
-                st.warning("Sektör verisi son dönem için bulunamadı.")
-        else:
-            kalem_pie = st.selectbox("Dağılım Kalemi:", df["Kalem"].unique(), key="pie_simple")
-            df_pie = df[(df["TarihObj"] == df["TarihObj"].max()) & (df["Kalem"] == kalem_pie)]
-            fig_pie = px.pie(df_pie, values="Değer", names="Taraf",
-                             color_discrete_sequence=px.colors.sequential.Oranges)
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-    with tab4:
         st.markdown("#### 📑 Ham Veri Tablosu")
-        df_display = df.sort_values(["TarihObj", "Taraf", "Kalem"])
-        st.dataframe(df_display, use_container_width=True)
+        # TarihObj'yi sıralama için kullan ama göstermek için drop et
+        df_display = df.sort_values(["TarihObj", "Taraf", "Kalem"]).drop(columns=["TarihObj"])
 
-        # --- EXCEL INDIRME DUZELTMESI ---
+        # Ekran ve Excel için binlik formatlama (Noktalı string format)
+        # Not: Excel'de bu string olarak görünür ama "1.000" formatını kullanıcı istedi.
+        df_formatted = df_display.copy()
+        df_formatted["Değer"] = df_formatted["Değer"].apply(lambda x: "{:,.0f}".format(x).replace(",", "."))
+
+        st.dataframe(df_formatted, use_container_width=True)
+
+        # --- EXCEL ÇIKTISI (HER VERİ AYRI SAYFA + FORMATLI) ---
         buffer = io.BytesIO()
-        # engine='xlsxwriter' kaldırıldı, varsayılan (veya openpyxl) kullanılacak.
         with pd.ExcelWriter(buffer) as writer:
-            df_display.to_excel(writer, index=False, sheet_name='BDDK_Veri')
+            unique_kalemler = df_formatted["Kalem"].unique()
+            for kalem_adi in unique_kalemler:
+                # O kaleme ait veriyi süz
+                sub_df = df_formatted[df_formatted["Kalem"] == kalem_adi]
+                # Sayfa ismi max 31 karakter olabilir, Excel kuralı
+                sheet_name = kalem_adi[:30].replace("/", "-").replace("\\", "-")
+                sub_df.to_excel(writer, index=False, sheet_name=sheet_name)
 
         st.download_button(
             label="💾 Excel İndir",
