@@ -18,7 +18,6 @@ import sys
 import io
 
 # --- 1. AYARLAR VE TASARIM ---
-# initial_sidebar_state="expanded" ile menü açık başlar
 st.set_page_config(page_title="Finansal Analiz Pro", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -60,16 +59,20 @@ st.markdown("""
 # --- 2. CONFIG ---
 AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
               "Aralık"]
-TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
+TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu"]
 
 VERI_KONFIGURASYONU = {
-    "📌 TOPLAM AKTİFLER": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
-    "📌 TOPLAM ÖZKAYNAKLAR": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR",
+    "📌 Toplam Aktifler": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
+    "📌 Toplam Özkaynaklar": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR",
                              "col_id": "grdRapor_Toplam"},
     "⚠️ Takipteki Alacaklar": {"tab": "tabloListesiItem-1", "row_text": "Takipteki Alacaklar",
                                "col_id": "grdRapor_Toplam"},
-    "💰 DÖNEM NET KARI": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)",
+    "💰 Dönem Net Kârı": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)",
                          "col_id": "grdRapor_Toplam"},
+    "📊 Sermaye Yeterliliği Rasyosu": {"tab": "#tabloListesiItem-12", "row_text": "Sermaye Yeterliliği Standart Rasyosu",
+                                      "col_attr": "grdRapor_Toplam"},
+    "💳 Bireysel Kredi Kartları": {"tab": "#tabloListesiItem-4", "row_text": "Bireysel Kredi Kartları (10+11)",
+                                  "col_attr": "grdRapor_Toplam"},
     "🏦 Toplam Krediler": {"tab": "tabloListesiItem-3", "row_text": "Toplam Krediler", "col_id": "grdRapor_Toplam"},
     "🏠 Tüketici Kredileri": {"tab": "tabloListesiItem-4", "row_text": "Tüketici Kredileri",
                              "col_id": "grdRapor_Toplam"},
@@ -107,7 +110,6 @@ def get_driver():
 
 
 # --- 4. VERİ ÇEKME MOTORU ---
-# status_text_obj parametresi eklendi: İşlenen ayı yazdırmak için
 def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_text_obj,
                      progress_bar_obj):
     driver = None
@@ -259,16 +261,13 @@ if btn:
     if not secilen_taraflar or not secilen_veriler:
         st.warning("Lütfen en az bir Taraf ve bir Veri kalemi seçin.")
     else:
-        # Progress bar ve durum mesajı (Barın üzerinde)
         status_txt = st.empty()
         status_txt.info("🌐 BDDK'ya bağlanılıyor, lütfen bekleyiniz...")
 
         my_bar = st.progress(0)
 
-        # Fonksiyona status_txt objesini de gönderiyoruz
         df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_txt, my_bar)
 
-        # Temizlik
         my_bar.empty()
         status_txt.empty()
 
@@ -355,8 +354,11 @@ if st.session_state['df_sonuc'] is not None:
 
     with tab3:
         st.markdown("#### 📑 Ham Veri Tablosu")
-        # Kalem ve TarihObj sütunlarını ekran için kaldır
-        df_display = df.sort_values(["TarihObj", "Taraf", "Kalem"]).drop(columns=["TarihObj", "Kalem"])
+        # Kalemi geri getirdik ve sıraya soktuk: Tarih -> Kalem -> Taraf
+        df_display = df.sort_values(["TarihObj", "Kalem", "Taraf"])
+
+        # Gösterilecek sütunları seç (TarihObj'yi at, Kalem'i tut)
+        df_display = df_display[["Dönem", "Kalem", "Taraf", "Değer"]]
 
         # Ekran için formatlama (Noktalı)
         df_formatted_display = df_display.copy()
@@ -366,7 +368,7 @@ if st.session_state['df_sonuc'] is not None:
         st.dataframe(df_formatted_display, use_container_width=True)
 
         # --- EXCEL ÇIKTISI ---
-        df_for_excel = df.copy().sort_values(["TarihObj", "Taraf", "Kalem"]).drop(columns=["TarihObj"])
+        df_for_excel = df.copy().sort_values(["TarihObj", "Kalem", "Taraf"])
         df_for_excel["Değer"] = df_for_excel["Değer"].apply(lambda x: "{:,.0f}".format(x).replace(",", "."))
 
         buffer = io.BytesIO()
@@ -374,7 +376,8 @@ if st.session_state['df_sonuc'] is not None:
             unique_kalemler = df_for_excel["Kalem"].unique()
             for kalem_adi in unique_kalemler:
                 sub_df = df_for_excel[df_for_excel["Kalem"] == kalem_adi].copy()
-                sub_df = sub_df.drop(columns=["Kalem"])
+                # Sayfa adı zaten kalem adı, bu yüzden Excel içinden çıkarıyoruz
+                sub_df = sub_df.drop(columns=["Kalem", "TarihObj"])
 
                 sheet_name = kalem_adi[:30].replace("/", "-").replace("\\", "-")
                 sub_df.to_excel(writer, index=False, sheet_name=sheet_name)
