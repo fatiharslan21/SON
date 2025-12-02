@@ -232,7 +232,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
         driver.set_page_load_timeout(60)
         status_container.info("🌐 BDDK sistemine bağlanılıyor...")
         driver.get("https://www.bddk.org.tr/bultenaylik")
-
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
         time.sleep(2)
 
@@ -252,21 +251,19 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                 status_container.info(f"⏳ İşleniyor: **{donem}**")
 
                 try:
-                    # Yıl seçimi
+                    # Yıl Seçimi
                     driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
                     sel_yil = Select(driver.find_element(By.ID, "ddlYil"))
                     sel_yil.select_by_visible_text(str(yil))
-                    # force change event
                     driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", driver.find_element(By.ID, "ddlYil"))
                     time.sleep(1)
 
-                    # Ay seçimi
+                    # Ay Seçimi
                     driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
                     sel_ay_elem = driver.find_element(By.ID, "ddlAy")
                     sel_ay = Select(sel_ay_elem)
                     sel_ay.select_by_visible_text(ay_str)
                     driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", sel_ay_elem)
-                    # bekle: ay seçiminden sonra içerik yenilenene kadar (kısa) bekle
                     time.sleep(2)
 
                     for taraf in secilen_taraflar:
@@ -274,106 +271,65 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                         taraf_elem = driver.find_element(By.ID, "ddlTaraf")
                         select_taraf = Select(taraf_elem)
 
-                        # Deneye deneye doğru seçeneği bul (esnek)
                         try:
                             select_taraf.select_by_visible_text(taraf)
                         except:
-                            found = False
                             for opt in select_taraf.options:
                                 if taraf in opt.text:
                                     select_taraf.select_by_visible_text(opt.text)
-                                    found = True
                                     break
-                            if not found:
-                                # eğer hiç bulunamazsa, atla
-                                status_container.warning(f"Taraf bulunamadı: {taraf} (atlandı)")
-                                continue
 
-                        # change event tetikle
                         driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", taraf_elem)
-
-                        # TARAF seçildikten sonra sayfanın güncellenmesini bekle.
-                        # Burada genel bir bekleme: en az bir table satırının gelmesi.
                         time.sleep(1.5)
 
-                        # Güncel page source al
+                        # Güncel page source
                         soup = BeautifulSoup(driver.page_source, 'html.parser')
 
                         for veri in secilen_veriler:
                             conf = VERI_KONFIGURASYONU[veri]
-                            # Tab tıklaması (varsa)
+
+                            # Tab varsa tıkla
                             try:
-                                # önce clickable olana kadar bekle, sonra tıkla
                                 WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, conf['tab'])))
                                 driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                                # tıklamanın ardından DOM'un güncellenmesini bekle:
-                                # hedef satır metninin oluşmasını bekle (kısa timeout)
-                                try:
-                                    WebDriverWait(driver, 8).until(
-                                        EC.presence_of_element_located((By.XPATH, f"//tr[contains(., \"{conf['row_text']}\")]"))
-                                    )
-                                except:
-                                    # bazen tablo id veya render farklı olabilir; kısa bekle
-                                    time.sleep(1.5)
+                                time.sleep(1.5)
                                 soup = BeautifulSoup(driver.page_source, 'html.parser')
-                            except Exception:
-                                # Tab yoksa veya tıklama yetmiyorsa, devam et
-                                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                            except:
+                                pass
 
-                            # Satırları tara
-                            target_rows = soup.find_all("tr")
-                            found_any = False
-                            for row in target_rows:
-                                if conf['row_text'] in row.get_text():
-                                    cols = row.find_all("td")
-                                    found_val = None
-                                    for col in cols:
-                                        cell_attrs = str(col.attrs)
-                                        if conf['col_id'] in cell_attrs:
-                                            raw_text = col.get_text().strip()
-                                            clean_text = raw_text.replace('.', '').replace(',', '.')
-                                            try:
-                                                found_val = float(clean_text)
-                                            except:
-                                                found_val = 0.0
-                                            break
+                            # Grup satırı + veri satırlarını tara
+                            current_group = None
+                            for row in soup.find_all("tr"):
+                                # Grup (Sektör/Kamu) kontrolü
+                                group_cell = row.find("td", colspan=True)
+                                if group_cell:
+                                    text = group_cell.get_text(strip=True)
+                                    if "Sektör" in text:
+                                        current_group = "Sektör"
+                                    elif "Kamu" in text:
+                                        current_group = "Kamu"
+                                    continue
 
-                                    if found_val is not None:
-                                        data.append({
-                                            "Dönem": donem, "Taraf": taraf, "Kalem": veri, "Değer": found_val,
-                                            "TarihObj": pd.to_datetime(f"{yil}-{ay_i+1}-01")
-                                        })
-                                        found_any = True
-                                        break
+                                # Normal veri satırları
+                                ad = row.find("td", {"aria-describedby": "grdRapor_Ad"})
+                                toplam = row.find("td", {"aria-describedby": conf['col_id']})
+                                if ad and toplam and current_group:
+                                    raw_text = toplam.get_text(strip=True)
+                                    clean_text = raw_text.replace('.', '').replace(',', '.')
+                                    try:
+                                        found_val = float(clean_text)
+                                    except:
+                                        found_val = 0.0
 
-                            if not found_any:
-                                # Eğer ilgili satır gelmediyse, kısa yeniden deneme (bazı AJAX durumlarında işe yarıyor)
-                                time.sleep(1)
-                                soup = BeautifulSoup(driver.page_source, 'html.parser')
-                                for row in soup.find_all("tr"):
-                                    if conf['row_text'] in row.get_text():
-                                        cols = row.find_all("td")
-                                        found_val = None
-                                        for col in cols:
-                                            cell_attrs = str(col.attrs)
-                                            if conf['col_id'] in cell_attrs:
-                                                raw_text = col.get_text().strip()
-                                                clean_text = raw_text.replace('.', '').replace(',', '.')
-                                                try:
-                                                    found_val = float(clean_text)
-                                                except:
-                                                    found_val = 0.0
-                                                break
-                                        if found_val is not None:
-                                            data.append({
-                                                "Dönem": donem, "Taraf": taraf, "Kalem": veri, "Değer": found_val,
-                                                "TarihObj": pd.to_datetime(f"{yil}-{ay_i+1}-01")
-                                            })
-                                            break
+                                    data.append({
+                                        "Dönem": donem,
+                                        "Taraf": current_group,
+                                        "Kalem": ad.get_text(strip=True),
+                                        "Değer": found_val,
+                                        "TarihObj": pd.to_datetime(f"{yil}-{ay_i+1}-01")
+                                    })
 
-                except Exception as step_e:
-                    # hata logla ama döngüyü kırma
-                    # st.warning(f"Adım hatası: {step_e}")
+                except:
                     pass
 
                 current_step += 1
