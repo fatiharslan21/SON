@@ -11,7 +11,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
-from openai import OpenAI
 import plotly.express as px
 import plotly.graph_objects as go
 import time
@@ -19,7 +18,7 @@ import sys
 import io
 
 # --- 1. AYARLAR VE TASARIM ---
-st.set_page_config(page_title="BDDK Veri Analizi", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
+st.set_page_config(page_title="BDDK Veri Robotu", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -46,9 +45,6 @@ st.markdown("""
         transform: scale(1.02); 
     }
 
-    [data-testid="stMetric"] { background-color: #FFFFFF; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #FCB131; }
-    [data-testid="stMetricLabel"] { font-weight: bold; color: #555; }
-    [data-testid="stMetricValue"] { color: #000000; font-weight: 800; font-size: 26px !important; }
     h1, h2, h3 { color: #d99000 !important; font-weight: 800; }
     .dataframe { font-size: 14px !important; }
 
@@ -60,20 +56,25 @@ st.markdown("""
 # --- 2. CONFIG ---
 AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
               "Aralık"]
-TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
+TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu"]
 
-# DÜZELTME NOTU: Bazı satırlarda 'col_attr' yazmışsınız, kod aşağıda 'col_id' arıyor.
-# Bu yüzden onları 'col_id' olarak düzelttim ki KeyError almayın.
 VERI_KONFIGURASYONU = {
     "📌 Toplam Aktifler": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
-    "📌 Toplam Özkaynaklar": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR", "col_id": "grdRapor_Toplam"},
-    "⚠️ Takipteki Alacaklar": {"tab": "tabloListesiItem-1", "row_text": "Takipteki Alacaklar", "col_id": "grdRapor_Toplam"},
-    "💰 Dönem Net Kârı": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)", "col_id": "grdRapor_Toplam"},
-    "📊 Sermaye Yeterliliği Rasyosu": {"tab": "tabloListesiItem-12", "row_text": "Sermaye Yeterliliği Standart Rasyosu", "col_id": "grdRapor_Toplam"},
-    "💳 Bireysel Kredi Kartları": {"tab": "tabloListesiItem-4", "row_text": "Bireysel Kredi Kartları (10+11)", "col_id": "grdRapor_Toplam"},
+    "📌 Toplam Özkaynaklar": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR",
+                             "col_id": "grdRapor_Toplam"},
+    "⚠️ Takipteki Alacaklar": {"tab": "tabloListesiItem-1", "row_text": "Takipteki Alacaklar",
+                               "col_id": "grdRapor_Toplam"},
+    "💰 Dönem Net Kârı": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)",
+                         "col_id": "grdRapor_Toplam"},
+    "📊 Sermaye Yeterliliği Rasyosu": {"tab": "tabloListesiItem-12", "row_text": "Sermaye Yeterliliği Standart Rasyosu",
+                                      "col_id": "grdRapor_Toplam"},
+    "💳 Bireysel Kredi Kartları": {"tab": "tabloListesiItem-4", "row_text": "Bireysel Kredi Kartları (10+11)",
+                                  "col_id": "grdRapor_Toplam"},
     "🏦 Toplam Krediler": {"tab": "tabloListesiItem-3", "row_text": "Toplam Krediler", "col_id": "grdRapor_Toplam"},
-    "🏠 Tüketici Kredileri": {"tab": "tabloListesiItem-4", "row_text": "Tüketici Kredileri", "col_id": "grdRapor_Toplam"},
-    "🏭 KOBİ Kredileri": {"tab": "tabloListesiItem-6", "row_text": "Toplam KOBİ Kredileri", "col_id": "grdRapor_NakdiKrediToplam"}
+    "🏠 Tüketici Kredileri": {"tab": "tabloListesiItem-4", "row_text": "Tüketici Kredileri",
+                             "col_id": "grdRapor_Toplam"},
+    "🏭 KOBİ Kredileri": {"tab": "tabloListesiItem-6", "row_text": "Toplam KOBİ Kredileri",
+                         "col_id": "grdRapor_NakdiKrediToplam"}
 }
 
 
@@ -136,7 +137,6 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
 
-                # Progress Bar Üstüne Anlık Bilgi Yaz
                 if status_text_obj:
                     status_text_obj.info(f"⏳ **İşleniyor:** {donem}")
 
@@ -195,7 +195,6 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
                                     continue
 
                                 ad = row.find("td", {"aria-describedby": "grdRapor_Ad"})
-                                # Düzeltme: Burada kod col_id arıyor, config'de col_attr olursa hata verirdi.
                                 toplam = row.find("td", {"aria-describedby": conf['col_id']})
 
                                 if ad and toplam:
@@ -243,14 +242,13 @@ with st.sidebar:
     bit_ay = c4.selectbox("Bitiş Ayı", AY_LISTESI, index=0, key="sb_bit_ay")
     st.markdown("---")
     secilen_taraflar = st.multiselect("Karşılaştır:", TARAF_SECENEKLERI, default=["Sektör"], key="sb_taraflar")
-    # HATA BURADAYDI: default değeri sözlükteki anahtarla birebir (harf büyüklüğü dahil) aynı olmalı.
     secilen_veriler = st.multiselect("Veri:", list(VERI_KONFIGURASYONU.keys()), default=["📌 Toplam Aktifler"],
                                      key="sb_veriler")
     st.markdown("---")
     st.markdown("### 🚀 İŞLEM MERKEZİ")
     btn = st.button("ANALİZİ BAŞLAT", key="sb_btn_baslat")
 
-st.title("🏦 BDDK Analiz Paneli")
+st.title("🏦 BDDK Veri Robotu")
 
 if 'df_sonuc' not in st.session_state:
     st.session_state['df_sonuc'] = None
@@ -284,32 +282,11 @@ if st.session_state['df_sonuc'] is not None:
     df = df.drop_duplicates(subset=["Dönem", "Taraf", "Kalem"])
     df = df.sort_values("TarihObj")
 
-    st.subheader("📊 Özet Performans (Son Dönem)")
-    try:
-        son_tarih = df["TarihObj"].max()
-        df_son = df[df["TarihObj"] == son_tarih]
+    # ÖZET PERFORMANS KUTULARI KALDIRILDI
 
-        cols = st.columns(4)
-        for i, (idx, row) in enumerate(df_son.head(8).iterrows()):
-            with cols[i % 4]:
-                prev_val = 0
-                df_prev = df[
-                    (df["TarihObj"] < son_tarih) & (df["Kalem"] == row["Kalem"]) & (df["Taraf"] == row["Taraf"])]
-                if not df_prev.empty:
-                    prev_val = df_prev.iloc[-1]["Değer"]
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📑 Detaylı Tablo", "🤖 Hazır Analiz Botu"])
 
-                delta_val = row["Değer"] - prev_val
-                delta_pct = (delta_val / prev_val * 100) if prev_val != 0 else 0
-                val_fmt = f"{row['Değer']:,.0f}".replace(",", ".")
-
-                label_text = f"{row['Taraf']} - {row['Kalem'][:10]}..."
-                st.metric(label=label_text, value=f"{val_fmt}", delta=f"%{delta_pct:.1f}")
-    except Exception as e:
-        st.error(f"Metrik hatası: {e}")
-
-    st.markdown("---")
-    # Mevcut satırı bulun ve şununla değiştirin:
-    tab1, tab2, tab3, tab4 = st.tabs(["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📑 Detaylı Tablo", "🤖 AI Yorumu"])
     with tab1:
         kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique(), key="trend_select")
         df_chart = df[df["Kalem"] == kalem_sec].copy()
@@ -364,126 +341,6 @@ if st.session_state['df_sonuc'] is not None:
             lambda x: "{:,.0f}".format(x).replace(",", "."))
 
         st.dataframe(df_formatted_display, use_container_width=True)
-        with tab4:
-            st.markdown("#### 🤖 Yapay Zeka Destekli Finansal Yorum")
-            st.info("Verileri analiz etmek için OpenAI (ChatGPT) API anahtarınızı giriniz. Anahtarınız kaydedilmez.")
-
-            # API Key Giriş Alanı
-            api_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
-
-            if api_key:
-                # Analiz Butonu
-                if st.button("🚀 Verileri Yorumla"):
-                    try:
-                        client = OpenAI(api_key=api_key)
-
-                        with st.spinner("Yapay zeka verileri inceliyor, finansal çıkarımlar yapıyor..."):
-                            # --- 1. Veriyi Hazırla (Token tasarrufu için özetliyoruz) ---
-                            # Sadece son 3 dönemi ve önemli değişimleri alalım
-                            df_ai = df.sort_values("TarihObj", ascending=True)
-                            son_donemler = df_ai["Dönem"].unique()[-3:]  # Son 3 dönem
-                            df_ai_ozet = df_ai[df_ai["Dönem"].isin(son_donemler)]
-
-                            # Veriyi metne çevir
-                            csv_data = df_ai_ozet[["Dönem", "Taraf", "Kalem", "Değer"]].to_csv(index=False)
-
-                            # --- 2. Prompt (Komut) Hazırla ---
-                            prompt = f"""
-                            Sen uzman bir bankacılık ve finans analistisin. 
-                            Aşağıdaki CSV formatındaki verileri analiz et.
-
-                            Veriler:
-                            {csv_data}
-
-                            Lütfen şunları yap:
-                            1. Verilerdeki ana trendi belirle (Artış/Azalış).
-                            2. Taraf bazında (Sektör vs Kamu vs Özel) dikkat çeken bir ayrışma varsa belirt.
-                            3. Bu veriler bankacılık sektörü için bir risk mi yoksa fırsat mı oluşturuyor?
-                            4. Finansal okuryazarlığı olan bir yöneticiye sunulacak profesyonel bir dille, Türkçe özetle.
-                            5. Sayısal verileri kullanırken binlik ayrımlarına dikkat et.
-                            """
-
-                            # --- 3. API'ye Gönder ---
-                            response = client.chat.completions.create(
-                                model="gpt-4o",  # Veya gpt-3.5-turbo
-                                messages=[
-                                    {"role": "system", "content": "Sen kıdemli bir finansal danışmansın."},
-                                    {"role": "user", "content": prompt}
-                                ],
-                                temperature=0.7
-                            )
-
-                            ai_reply = response.choices[0].message.content
-
-                        # --- 4. Sonucu Yazdır ---
-                        st.success("Analiz Tamamlandı!")
-                        st.markdown("---")
-                        st.markdown(ai_reply)
-
-                    except Exception as e:
-                        st.error(f"Hata oluştu: {e}. Lütfen API anahtarınızı ve bakiyenizi kontrol edin.")
-            else:
-                st.warning("Lütfen başlamak için API anahtarınızı girin.")
-        with tab4:
-            st.markdown("#### 🤖 Yapay Zeka Destekli Finansal Yorum")
-            st.info("Verileri analiz etmek için OpenAI (ChatGPT) API anahtarınızı giriniz. Anahtarınız kaydedilmez.")
-
-            # API Key Giriş Alanı
-            api_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
-
-            if api_key:
-                # Analiz Butonu
-                if st.button("🚀 Verileri Yorumla"):
-                    try:
-                        client = OpenAI(api_key=api_key)
-
-                        with st.spinner("Yapay zeka verileri inceliyor, finansal çıkarımlar yapıyor..."):
-                            # --- 1. Veriyi Hazırla (Token tasarrufu için özetliyoruz) ---
-                            # Sadece son 3 dönemi ve önemli değişimleri alalım
-                            df_ai = df.sort_values("TarihObj", ascending=True)
-                            son_donemler = df_ai["Dönem"].unique()[-3:]  # Son 3 dönem
-                            df_ai_ozet = df_ai[df_ai["Dönem"].isin(son_donemler)]
-
-                            # Veriyi metne çevir
-                            csv_data = df_ai_ozet[["Dönem", "Taraf", "Kalem", "Değer"]].to_csv(index=False)
-
-                            # --- 2. Prompt (Komut) Hazırla ---
-                            prompt = f"""
-                            Sen uzman bir bankacılık ve finans analistisin. 
-                            Aşağıdaki CSV formatındaki verileri analiz et.
-
-                            Veriler:
-                            {csv_data}
-
-                            Lütfen şunları yap:
-                            1. Verilerdeki ana trendi belirle (Artış/Azalış).
-                            2. Taraf bazında (Sektör vs Kamu vs Özel) dikkat çeken bir ayrışma varsa belirt.
-                            3. Bu veriler bankacılık sektörü için bir risk mi yoksa fırsat mı oluşturuyor?
-                            4. Finansal okuryazarlığı olan bir yöneticiye sunulacak profesyonel bir dille, Türkçe özetle.
-                            5. Sayısal verileri kullanırken binlik ayrımlarına dikkat et.
-                            """
-
-                            # --- 3. API'ye Gönder ---
-                            response = client.chat.completions.create(
-                                model="gpt-4o",  # Veya gpt-3.5-turbo
-                                messages=[
-                                    {"role": "system", "content": "Sen kıdemli bir finansal danışmansın."},
-                                    {"role": "user", "content": prompt}
-                                ],
-                                temperature=0.7
-                            )
-
-                            ai_reply = response.choices[0].message.content
-
-                        # --- 4. Sonucu Yazdır ---
-                        st.success("Analiz Tamamlandı!")
-                        st.markdown("---")
-                        st.markdown(ai_reply)
-
-                    except Exception as e:
-                        st.error(f"Hata oluştu: {e}. Lütfen API anahtarınızı ve bakiyenizi kontrol edin.")
-            else:
-                st.warning("Lütfen başlamak için API anahtarınızı girin.")
 
         # --- EXCEL ÇIKTISI ---
         df_for_excel = df.copy().sort_values(["TarihObj", "Kalem", "Taraf"])
@@ -507,3 +364,59 @@ if st.session_state['df_sonuc'] is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="btn_excel"
         )
+
+    with tab4:
+        st.markdown("#### 🤖 Hazır Analiz Botu")
+        st.info("Aşağıdan bir veri kalemi seçin, sistem size otomatik bir durum raporu oluştursun.")
+
+        analiz_kalem = st.selectbox("Analiz Edilecek Kalem:", df["Kalem"].unique(), key="bot_select")
+
+        if st.button("Raporu Oluştur", key="btn_bot"):
+            # Veriyi Hazırla
+            df_analiz = df[df["Kalem"] == analiz_kalem].sort_values("TarihObj")
+            son_tarih = df_analiz["TarihObj"].max()
+            onceki_tarih = df_analiz["TarihObj"].unique()[-2] if len(df_analiz["TarihObj"].unique()) > 1 else None
+
+            st.markdown(f"### 📋 {analiz_kalem} - Durum Raporu")
+
+            # 1. Genel Sektör Yorumu
+            sektor_row = df_analiz[(df_analiz["Taraf"] == "Sektör") & (df_analiz["TarihObj"] == son_tarih)]
+            if not sektor_row.empty:
+                sektor_val = sektor_row.iloc[0]["Değer"]
+
+                # Büyüme Hesapla
+                if onceki_tarih:
+                    prev_row = df_analiz[(df_analiz["Taraf"] == "Sektör") & (df_analiz["TarihObj"] == onceki_tarih)]
+                    if not prev_row.empty:
+                        prev_val = prev_row.iloc[0]["Değer"]
+                        degisim = ((sektor_val - prev_val) / prev_val) * 100
+                        trend_emoji = "📈" if degisim > 0 else "📉"
+                        yorum = "artış" if degisim > 0 else "azalış"
+
+                        st.success(
+                            f"**Genel Trend:** Sektör genelinde **{analiz_kalem}** kalemi son ayda **%{degisim:.2f}** oranında {yorum} gösterdi. {trend_emoji}")
+
+            # 2. Karşılaştırmalı Analiz
+            st.markdown("**🔍 Detaylı Kırılımlar:**")
+            tum_taraflar = df_analiz[df_analiz["TarihObj"] == son_tarih]
+            tum_taraflar = tum_taraflar[tum_taraflar["Taraf"] != "Sektör"].sort_values("Değer", ascending=False)
+
+            if not tum_taraflar.empty:
+                lider = tum_taraflar.iloc[0]
+                st.markdown(f"- En büyük paya sahip grup: **{lider['Taraf']}** ({lider['Değer']:,.0f} TL)")
+
+                # Büyüme Karşılaştırması
+                if onceki_tarih:
+                    buyume_listesi = []
+                    for t in tum_taraflar["Taraf"].unique():
+                        t_now = \
+                        df_analiz[(df_analiz["Taraf"] == t) & (df_analiz["TarihObj"] == son_tarih)]["Değer"].values[0]
+                        t_prev_rows = df_analiz[(df_analiz["Taraf"] == t) & (df_analiz["TarihObj"] == onceki_tarih)]
+                        if not t_prev_rows.empty:
+                            t_prev = t_prev_rows["Değer"].values[0]
+                            pct = ((t_now - t_prev) / t_prev) * 100
+                            buyume_listesi.append((t, pct))
+
+                    if buyume_listesi:
+                        en_hizli = max(buyume_listesi, key=lambda item: item[1])
+                        st.markdown(f"- En hızlı büyüyen grup: **{en_hizli[0]}** (%{en_hizli[1]:.2f} artış ile).")
