@@ -1,70 +1,26 @@
 import streamlit as st
-import pandas as pd
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
-from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import plotly.express as px
-import time
 import sys
 import os
+import time
 
-# --- 1. TASARIM VE AYARLAR ---
-st.set_page_config(page_title="BDDK Analiz", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Sunucu Gözü", layout="wide")
 
-
-def local_css():
-    st.markdown("""
-    <style>
-        .stApp { background-color: #FFFFFF; }
-        [data-testid="stSidebar"] { background-color: #FCB131; }
-        [data-testid="stSidebar"] * { color: #000000 !important; font-weight: bold; }
-        h1, h2, h3 { color: #d99000 !important; font-weight: 800; }
-        div.stButton > button { background-color: #FCB131; color: black; border: 2px solid black; width: 100%; }
-    </style>
-    """, unsafe_allow_html=True)
+st.title("🕵️ BDDK Bağlantı Testi")
+st.warning("Bu kod sunucunun BDDK sitesine girip giremediğini test eder.")
 
 
-local_css()
-
-# --- 2. SABİTLER ---
-AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
-              "Aralık"]
-TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
-VERI_KONFIGURASYONU = {
-    "📌 TOPLAM AKTİFLER": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
-    "📌 TOPLAM ÖZKAYNAKLAR": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM ÖZKAYNAKLAR",
-                             "col_id": "grdRapor_Toplam"},
-    "⚠️ Takipteki Alacaklar": {"tab": "tabloListesiItem-1", "row_text": "Takipteki Alacaklar",
-                               "col_id": "grdRapor_Toplam"},
-    "💰 DÖNEM NET KARI/ZARARI": {"tab": "tabloListesiItem-2", "row_text": "DÖNEM NET KARI (ZARARI)",
-                                "col_id": "grdRapor_Toplam"},
-    "🏦 Toplam Krediler": {"tab": "tabloListesiItem-3", "row_text": "Toplam Krediler", "col_id": "grdRapor_Toplam"},
-    "🏠 Tüketici Kredileri": {"tab": "tabloListesiItem-4", "row_text": "Tüketici Kredileri",
-                             "col_id": "grdRapor_Toplam"},
-    "💳 Bireysel Kredi Kartları": {"tab": "tabloListesiItem-4", "row_text": "Bireysel Kredi Kartları",
-                                  "col_id": "grdRapor_Toplam"},
-    "🏭 KOBİ Kredileri": {"tab": "tabloListesiItem-6", "row_text": "Toplam KOBİ Kredileri",
-                         "col_id": "grdRapor_NakdiKrediToplam"},
-}
-
-
-# --- 3. SÜRÜCÜ AYARLARI ---
+# --- DRIVER AYARLARI ---
 def get_driver():
     if sys.platform == "linux":
-        # Cloud (Firefox)
+        # CLOUD AYARLARI (FIREFOX)
         options = FirefoxOptions()
         options.add_argument("--headless")
         options.add_argument("--width=1920")
         options.add_argument("--height=1080")
-        options.set_preference("general.useragent.override",
-                               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
         options.binary_location = "/usr/bin/firefox"
         try:
             service = FirefoxService(GeckoDriverManager().install())
@@ -72,169 +28,51 @@ def get_driver():
             service = FirefoxService("/usr/local/bin/geckodriver")
         return webdriver.Firefox(service=service, options=options)
     else:
-        # Local (Chrome)
+        # LOCAL AYARLAR (CHROME - Test İçin)
+        from selenium.webdriver.chrome.options import Options as ChromeOptions
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        from webdriver_manager.chrome import ChromeDriverManager
         options = ChromeOptions()
-        options.add_argument("--start-maximized")
         service = ChromeService(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
 
 
-# --- 4. VERİ ÇEKME ---
-def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
+if st.button("BAĞLANTIYI TEST ET"):
     driver = None
-    master_data = []
+    status = st.empty()
 
     try:
+        status.info("🌐 Tarayıcı başlatılıyor...")
         driver = get_driver()
-        status_container.info("🌐 Siteye bağlanılıyor...")
+
+        status.info("🌐 BDDK sitesine gidiliyor...")
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
-        # Sayfa Yüklenene Kadar Bekle
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
+        # 5 Saniye bekle (Yüklenmesi için)
+        time.sleep(5)
 
-        bas_idx = AY_LISTESI.index(bas_ay)
-        bit_idx = AY_LISTESI.index(bit_ay)
-        total_steps = (bit_yil - bas_yil) * 12 + (bit_idx - bas_idx) + 1
-        current_step = 0
-        progress_bar = st.progress(0)
+        # 1. BAŞLIK KONTROLÜ
+        site_title = driver.title
+        st.write(f"**Site Başlığı:** {site_title}")
 
-        for yil in range(bas_yil, bit_yil + 1):
-            s_m = bas_idx if yil == bas_yil else 0
-            e_m = bit_idx if yil == bit_yil else 11
+        # 2. EKRAN GÖRÜNTÜSÜ AL (HER DURUMDA)
+        status.info("📸 Fotoğraf çekiliyor...")
+        driver.save_screenshot("kanit.png")
+        st.image("kanit.png", caption="Sunucunun Gördüğü Ekran", use_container_width=True)
 
-            for ay_i in range(s_m, e_m + 1):
-                ay_str = AY_LISTESI[ay_i]
-                donem = f"{ay_str} {yil}"
-                tarih_obj = pd.to_datetime(f"{yil}-{ay_i + 1}-01")
+        # 3. HTML KAYNAK KODUNDAN İLK 500 KARAKTER
+        st.text("Sayfa Kaynağı (İlk 500 Karakter):")
+        st.code(driver.page_source[:500])
 
-                status_container.info(f"⏳ İşleniyor: **{donem}**")
-
-                # Tarih Değiştirme (JS)
-                driver.execute_script(f"""
-                    $('#ddlYil').val('{yil}').trigger('chosen:updated').trigger('change');
-                    $('#ddlAy').val('{ay_str}').trigger('chosen:updated').trigger('change');
-                """)
-                # Sunucu yavaşsa diye bekleme süresini artırdık
-                time.sleep(3)
-
-                for taraf in secilen_taraflar:
-                    # Taraf Değiştirme
-                    driver.execute_script(f"""
-                        var t = document.getElementById('ddlTaraf');
-                        for(var i=0; i<t.options.length; i++){{
-                            if(t.options[i].text.trim() == '{taraf}'){{
-                                t.selectedIndex = i;
-                                break;
-                            }}
-                        }}
-                        $(t).trigger('chosen:updated').trigger('change');
-                    """)
-                    time.sleep(1.5)
-
-                    for veri in secilen_veriler:
-                        conf = VERI_KONFIGURASYONU[veri]
-                        try:
-                            # Sekme Tıklama
-                            driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                            time.sleep(0.8)
-
-                            xpath = f"//tr[contains(., '{conf['row_text']}')]//td[contains(@aria-describedby, '{conf['col_id']}')]"
-                            element = driver.find_element(By.XPATH, xpath)
-                            val_num = float(element.text.replace('.', '').replace(',', '.')) if element.text else 0.0
-
-                            master_data.append({
-                                "Tarih": tarih_obj, "Dönem": donem, "Taraf": taraf,
-                                "Kalem": veri, "Değer": val_num
-                            })
-                        except Exception as inner_e:
-                            # Hata olursa sadece bu veriyi atla
-                            pass
-
-                current_step += 1
-                progress_bar.progress(current_step / max(1, total_steps))
-
-        return pd.DataFrame(master_data)
+        # 4. KONTROL
+        if "ddlYil" in driver.page_source:
+            st.success("✅ BAŞARILI! Site yüklendi ve veri çekilebilir.")
+        elif "Access Denied" in driver.page_source or "Erişim Reddedildi" in driver.page_source:
+            st.error("⛔ ERİŞİM ENGELLENDİ! BDDK, Streamlit Cloud IP adreslerini bloklamış.")
+        else:
+            st.warning("⚠️ Site açıldı ama beklenen içerik gelmedi. Ekran görüntüsüne bakın.")
 
     except Exception as e:
-        st.error(f"❌ KRİTİK HATA: {e}")
-
-        # --- DEBUG MODU: EKRAN GÖRÜNTÜSÜ AL ---
-        # Hata anında tarayıcının ne gördüğünü kaydeder ve ekrana basar.
-        if driver:
-            driver.save_screenshot("hata_goruntusu.png")
-            st.image("hata_goruntusu.png", caption="Hata Anında Sunucu Ekranı")
-
-        return pd.DataFrame()
+        st.error(f"HATA OLUŞTU: {e}")
     finally:
         if driver: driver.quit()
-
-
-# --- 5. ANA UYGULAMA ---
-def main():
-    with st.sidebar:
-        st.title("🎛️ PANEL")
-        st.markdown("---")
-        c1, c2 = st.columns(2)
-        bas_yil = c1.number_input("Başlangıç", 2024, 2030, 2024)
-        bas_ay = c1.selectbox("Ay", AY_LISTESI, index=0)
-        c3, c4 = st.columns(2)
-        bit_yil = c3.number_input("Bitiş", 2024, 2030, 2024)
-        bit_ay = c4.selectbox("Ay ", AY_LISTESI, index=0)
-
-        st.markdown("---")
-        secilen_taraflar = st.multiselect("Taraf", TARAF_SECENEKLERI, default=["Sektör"])
-        secilen_veriler = st.multiselect("Veri", list(VERI_KONFIGURASYONU.keys()), default=["📌 TOPLAM AKTİFLER"])
-
-        st.markdown("---")
-        calistir = st.button("🚀 ANALİZİ BAŞLAT")
-
-    st.title("🏦 BDDK Gelişmiş Analiz")
-
-    if 'scraped_data' not in st.session_state:
-        st.session_state['scraped_data'] = None
-
-    if calistir:
-        if not secilen_taraflar or not secilen_veriler:
-            st.error("Seçim yapınız.")
-        else:
-            status_text = st.empty()
-            df_yeni = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_text)
-
-            if not df_yeni.empty:
-                st.session_state['scraped_data'] = df_yeni
-                status_text.success("✅ Veri Başarıyla Çekildi! Lütfen Bekleyin...")
-                time.sleep(1)
-                st.rerun()
-            else:
-                status_text.error("⚠️ Veri boş döndü. Aşağıdaki hata görüntüsünü kontrol edin.")
-
-    # --- DASHBOARD ---
-    if st.session_state['scraped_data'] is not None:
-        df = st.session_state['scraped_data']
-        tab1, tab2, tab3 = st.tabs(["📊 ANALİZ", "📑 TABLO", "📥 İNDİR"])
-
-        with tab1:
-            kalem = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
-            df_c = df[df["Kalem"] == kalem].sort_values("Tarih")
-            fig = px.line(df_c, x="Dönem", y="Değer", color="Taraf", markers=True,
-                          title=f"{kalem} Trendi", color_discrete_sequence=["#FCB131", "#000000", "#FF5733"])
-            st.plotly_chart(fig, use_container_width=True)
-
-        with tab2:
-            st.dataframe(df.pivot_table(index="Dönem", columns=["Kalem", "Taraf"], values="Değer", aggfunc="sum"),
-                         use_container_width=True)
-
-        with tab3:
-            buffer = "BDDK_Rapor.xlsx"
-            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                df.to_excel(writer, sheet_name="Ham Veri", index=False)
-                for k in df["Kalem"].unique():
-                    name = "".join(c for c in k if c.isalnum())[:30]
-                    df[df["Kalem"] == k].pivot(index="Dönem", columns="Taraf", values="Değer").to_excel(writer,
-                                                                                                        sheet_name=name)
-            with open(buffer, "rb") as f:
-                st.download_button("Excel İndir", f, file_name="BDDK_Analiz.xlsx")
-
-
-if __name__ == "__main__":
-    main()
