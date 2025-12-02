@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import numpy as np  # İstatistiksel hesaplar için eklendi
+import numpy as np
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -69,7 +69,7 @@ st.markdown("""
 # --- 2. CONFIG ---
 AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
               "Aralık"]
-TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu"]
+TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
 
 VERI_KONFIGURASYONU = {
     "📌 Toplam Aktifler": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
@@ -111,6 +111,9 @@ def get_driver():
         options.add_argument("--disable-gpu")
         options.add_argument("--window-size=1920,1080")
 
+        # Hız optimizasyonu için ek ayarlar
+        options.add_argument("--blink-settings=imagesEnabled=false")  # Resimleri yükleme
+
         try:
             service = ChromeService(ChromeDriverManager().install())
             return webdriver.Chrome(service=service, options=options)
@@ -119,7 +122,7 @@ def get_driver():
             return None
 
 
-# --- 4. VERİ ÇEKME MOTORU ---
+# --- 4. VERİ ÇEKME MOTORU (TURBO MOD) ---
 def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_text_obj,
                      progress_bar_obj):
     driver = None
@@ -133,14 +136,25 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
         driver.set_page_load_timeout(60)
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
-        time.sleep(2)
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "ddlYil")))
+
+        # Bekleme süreleri kısaltıldı, akıllı wait eklendi
+        short_sleep = 0.5
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
 
         total_steps = (bit_yil - bas_yil) * 12 + (bit_idx - bas_idx) + 1
         current_step = 0
+
+        # --- OPTİMİZASYON 1: Gerekli Sekmeleri Grupla ---
+        # Hangi verilerin hangi sekmede olduğunu önceden belirle
+        tabs_needed = {}  # { 'tabloListesiItem-1': ['Toplam Aktifler', 'Özkaynaklar'] }
+        for veri in secilen_veriler:
+            tab_id = VERI_KONFIGURASYONU[veri]['tab']
+            if tab_id not in tabs_needed:
+                tabs_needed[tab_id] = []
+            tabs_needed[tab_id].append(veri)
 
         for yil in range(bas_yil, bit_yil + 1):
             s_m = bas_idx if yil == bas_yil else 0
@@ -151,82 +165,89 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
                 donem = f"{ay_str} {yil}"
 
                 if status_text_obj:
-                    status_text_obj.info(f"⏳ **İşleniyor:** {donem}")
+                    status_text_obj.info(f"⚡ **Hızlı Çekim Modu:** {donem}")
 
                 try:
-                    driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
+                    # Yıl Seçimi
                     sel_yil = Select(driver.find_element(By.ID, "ddlYil"))
-                    sel_yil.select_by_visible_text(str(yil))
-                    driver.execute_script("arguments[0].dispatchEvent(new Event('change'))",
-                                          driver.find_element(By.ID, "ddlYil"))
-                    time.sleep(1.5)
+                    if sel_yil.first_selected_option.text != str(yil):
+                        sel_yil.select_by_visible_text(str(yil))
+                        time.sleep(short_sleep)  # Kısa bekleme
 
-                    driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
-                    sel_ay_elem = driver.find_element(By.ID, "ddlAy")
-                    sel_ay = Select(sel_ay_elem)
-                    sel_ay.select_by_visible_text(ay_str)
-                    driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", sel_ay_elem)
-                    time.sleep(2)
+                    # Ay Seçimi
+                    sel_ay = Select(driver.find_element(By.ID, "ddlAy"))
+                    if sel_ay.first_selected_option.text != ay_str:
+                        sel_ay.select_by_visible_text(ay_str)
+                        time.sleep(short_sleep)
 
                     for taraf in secilen_taraflar:
-                        driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
+                        # Taraf Seçimi
                         taraf_elem = driver.find_element(By.ID, "ddlTaraf")
                         select_taraf = Select(taraf_elem)
-                        try:
-                            select_taraf.select_by_visible_text(taraf)
-                        except:
-                            for opt in select_taraf.options:
-                                if taraf in opt.text:
-                                    select_taraf.select_by_visible_text(opt.text)
-                                    break
 
-                        driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", taraf_elem)
-                        time.sleep(1.5)
-
-                        soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-                        for veri in secilen_veriler:
-                            conf = VERI_KONFIGURASYONU[veri]
-
+                        # Zaten seçiliyse tekrar seçme
+                        mevcut_taraf = select_taraf.first_selected_option.text
+                        if taraf not in mevcut_taraf:
                             try:
-                                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, conf['tab'])))
-                                driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                                time.sleep(1.5)
-                                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                                select_taraf.select_by_visible_text(taraf)
                             except:
-                                pass
+                                for opt in select_taraf.options:
+                                    if taraf in opt.text:
+                                        select_taraf.select_by_visible_text(opt.text)
+                                        break
+                            time.sleep(short_sleep)
 
-                            current_group = None
-                            for row in soup.find_all("tr"):
-                                group_cell = row.find("td", colspan=True)
-                                if group_cell:
-                                    text = group_cell.get_text(strip=True)
-                                    if "Sektör" in text:
-                                        current_group = "Sektör"
-                                    elif "Kamu" in text:
-                                        current_group = "Kamu"
-                                    continue
+                        # --- OPTİMİZASYON 2: Sekme Bazlı Çekim ---
+                        # Her veri için değil, her SEKME için döngü kuruyoruz
+                        for tab_id, veriler_in_tab in tabs_needed.items():
+                            try:
+                                # Sekmeye tıkla
+                                tab_btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, tab_id)))
+                                driver.execute_script("arguments[0].click();", tab_btn)
+                                time.sleep(0.7)  # Tablo yüklenmesi için minik bir nefes
 
-                                ad = row.find("td", {"aria-describedby": "grdRapor_Ad"})
-                                toplam = row.find("td", {"aria-describedby": conf['col_id']})
+                                # HTML'i SADECE BİR KERE ÇEK (Bu sekme için)
+                                soup = BeautifulSoup(driver.page_source, 'html.parser')
 
-                                if ad and toplam:
-                                    row_taraf = current_group if current_group else taraf
-                                    if conf['row_text'] in ad.get_text(strip=True):
-                                        raw_text = toplam.get_text(strip=True)
-                                        clean_text = raw_text.replace('.', '').replace(',', '.')
-                                        try:
-                                            found_val = float(clean_text)
-                                        except:
-                                            found_val = 0.0
+                                # Bu sekmedeki tüm istenen verileri bu HTML'den ayıkla
+                                for veri_adi in veriler_in_tab:
+                                    conf = VERI_KONFIGURASYONU[veri_adi]
 
-                                        data.append({
-                                            "Dönem": donem,
-                                            "Taraf": row_taraf,
-                                            "Kalem": veri,
-                                            "Değer": found_val,
-                                            "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
-                                        })
+                                    current_group = None
+                                    for row in soup.find_all("tr"):
+                                        group_cell = row.find("td", colspan=True)
+                                        if group_cell:
+                                            text = group_cell.get_text(strip=True)
+                                            if "Sektör" in text:
+                                                current_group = "Sektör"
+                                            elif "Kamu" in text:
+                                                current_group = "Kamu"
+                                            continue
+
+                                        ad = row.find("td", {"aria-describedby": "grdRapor_Ad"})
+                                        toplam = row.find("td", {"aria-describedby": conf['col_id']})
+
+                                        if ad and toplam:
+                                            row_taraf = current_group if current_group else taraf
+                                            if conf['row_text'] in ad.get_text(strip=True):
+                                                raw_text = toplam.get_text(strip=True)
+                                                clean_text = raw_text.replace('.', '').replace(',', '.')
+                                                try:
+                                                    found_val = float(clean_text)
+                                                except:
+                                                    found_val = 0.0
+
+                                                data.append({
+                                                    "Dönem": donem,
+                                                    "Taraf": row_taraf,
+                                                    "Kalem": veri_adi,
+                                                    "Değer": found_val,
+                                                    "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
+                                                })
+                                                break  # Satırı bulduysan diğer satırlara bakma
+                            except Exception as e_tab:
+                                pass  # Sekme hatası
+
                 except Exception as e:
                     pass
 
@@ -260,7 +281,7 @@ with st.sidebar:
     st.markdown("### 🚀 İŞLEM MERKEZİ")
     btn = st.button("ANALİZİ BAŞLAT", key="sb_btn_baslat")
 
-st.title("🏦 BDDK Analiz Botu")
+st.title("🏦 BDDK Analiz Botu (Turbo Mod)")
 
 if 'df_sonuc' not in st.session_state:
     st.session_state['df_sonuc'] = None
@@ -270,7 +291,7 @@ if btn:
         st.warning("Lütfen en az bir Taraf ve bir Veri kalemi seçin.")
     else:
         status_txt = st.empty()
-        status_txt.info("🌐 BDDK'ya bağlanılıyor, lütfen bekleyiniz...")
+        status_txt.info("🌐 BDDK'ya bağlanılıyor, turbo mod devrede...")
         my_bar = st.progress(0)
         df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_txt, my_bar)
         my_bar.empty()
@@ -310,8 +331,7 @@ if st.session_state['df_sonuc'] is not None:
         fig.update_layout(hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True, key="trend_chart")
 
-
-    # 3. SEKME: SENARYO
+    # 2. SEKME: SENARYO
     with tab2:
         st.markdown("#### 🧪 What-If Analizi")
         c_sim1, c_sim2 = st.columns([1, 2])
@@ -339,7 +359,7 @@ if st.session_state['df_sonuc'] is not None:
                 fig_sim.update_layout(height=250, showlegend=False)
                 st.plotly_chart(fig_sim, use_container_width=True)
 
-    # 4. SEKME: TABLO & EXCEL
+    # 3. SEKME: TABLO & EXCEL
     with tab3:
         st.markdown("#### 📑 Ham Veri")
         df_display = df.sort_values(["TarihObj", "Kalem", "Taraf"])[["Dönem", "Kalem", "Taraf", "Değer"]]
@@ -357,7 +377,7 @@ if st.session_state['df_sonuc'] is not None:
         st.download_button("💾 Excel İndir", buffer.getvalue(), "bddk_analiz.xlsx",
                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_btn")
 
-    # 5. SEKME: AKILLI ANALİZ BOTU 2.0 (ŞOV KISMI)
+    # 4. SEKME: AKILLI ANALİZ BOTU 2.0 (ŞOV KISMI)
     with tab4:
         st.markdown("#### 🧠 Akıllı Analiz Botu 2.0")
         st.info("Verileri istatistiksel olarak inceler, riskleri ve fırsatları matematiksel olarak bulur.")
