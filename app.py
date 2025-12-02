@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np  # İstatistiksel hesaplar için eklendi
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -18,7 +19,7 @@ import sys
 import io
 
 # --- 1. AYARLAR VE TASARIM ---
-st.set_page_config(page_title="BDDK Veri Robotu", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
+st.set_page_config(page_title="BDDK ANALİZ", layout="wide", page_icon="🏦", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -26,7 +27,7 @@ st.markdown("""
     [data-testid="stSidebar"] { background-color: #FCB131; border-right: 1px solid #e0e0e0; }
     [data-testid="stSidebar"] * { color: #000000 !important; font-family: 'Segoe UI', sans-serif; }
 
-    /* ANALİZİ BAŞLAT BUTONU: BEYAZ ZEMİN, SİYAH YAZI */
+    /* BUTON TASARIMI */
     div.stButton > button { 
         background-color: #FFFFFF !important; 
         color: #000000 !important; 
@@ -37,10 +38,11 @@ st.markdown("""
         padding: 15px; 
         font-size: 18px !important; 
         transition: all 0.3s ease; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     div.stButton > button:hover { 
         background-color: #000000 !important; 
-        color: #FFFFFF !important; 
+        color: #FCB131 !important; 
         border-color: #000000 !important; 
         transform: scale(1.02); 
     }
@@ -48,7 +50,18 @@ st.markdown("""
     h1, h2, h3 { color: #d99000 !important; font-weight: 800; }
     .dataframe { font-size: 14px !important; }
 
-    /* YAN PANELİ KAPATMA TUŞUNU GİZLE (SABİT KALSIN) */
+    /* KART TASARIMI (BOT İÇİN) */
+    .bot-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #FCB131;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        margin-bottom: 10px;
+    }
+    .bot-title { font-weight: bold; font-size: 18px; color: #333; }
+    .bot-value { font-size: 24px; font-weight: bold; color: #000; }
+
     [data-testid="stSidebarCollapseButton"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
@@ -56,7 +69,7 @@ st.markdown("""
 # --- 2. CONFIG ---
 AY_LISTESI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
               "Aralık"]
-TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu"]
+TARAF_SECENEKLERI = ["Sektör", "Mevduat-Kamu", "Mevduat-Yerli Özel", "Mevduat-Yabancı", "Katılım"]
 
 VERI_KONFIGURASYONU = {
     "📌 Toplam Aktifler": {"tab": "tabloListesiItem-1", "row_text": "TOPLAM AKTİFLER", "col_id": "grdRapor_Toplam"},
@@ -233,7 +246,6 @@ def scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen
 with st.sidebar:
     st.title("🎛️ KONTROL PANELİ")
     st.markdown("---")
-
     c1, c2 = st.columns(2)
     bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024, key="sb_bas_yil")
     bas_ay = c1.selectbox("Başlangıç Ayı", AY_LISTESI, index=0, key="sb_bas_ay")
@@ -248,7 +260,7 @@ with st.sidebar:
     st.markdown("### 🚀 İŞLEM MERKEZİ")
     btn = st.button("ANALİZİ BAŞLAT", key="sb_btn_baslat")
 
-st.title("🏦 BDDK Veri Robotu")
+st.title("🏦 BDDK Analiz Botu")
 
 if 'df_sonuc' not in st.session_state:
     st.session_state['df_sonuc'] = None
@@ -259,11 +271,8 @@ if btn:
     else:
         status_txt = st.empty()
         status_txt.info("🌐 BDDK'ya bağlanılıyor, lütfen bekleyiniz...")
-
         my_bar = st.progress(0)
-
         df = scrape_bddk_data(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_txt, my_bar)
-
         my_bar.empty()
         status_txt.empty()
 
@@ -274,7 +283,7 @@ if btn:
             time.sleep(1)
             st.rerun()
         else:
-            st.error("Veri bulunamadı veya bağlantı hatası oluştu.")
+            st.error("Veri bulunamadı.")
 
 # --- DASHBOARD ---
 if st.session_state['df_sonuc'] is not None:
@@ -282,141 +291,179 @@ if st.session_state['df_sonuc'] is not None:
     df = df.drop_duplicates(subset=["Dönem", "Taraf", "Kalem"])
     df = df.sort_values("TarihObj")
 
-    # ÖZET PERFORMANS KUTULARI KALDIRILDI
+    # 4 SEKMELİ ŞOV ALANI
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📉 Trend Analizi",
+        "🏁 Zaman Yarışı",
+        "🧪 Senaryo",
+        "📑 Veri Tablosu",
+        "🧠 Akıllı Analiz Botu 2.0"
+    ])
 
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📑 Detaylı Tablo", "🤖 Hazır Analiz Botu"])
-
+    # 1. SEKME: TREND (KLASİK)
     with tab1:
         kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique(), key="trend_select")
-        df_chart = df[df["Kalem"] == kalem_sec].copy()
-        df_chart = df_chart.sort_values("TarihObj")
-
-        fig = px.line(df_chart, x="Dönem", y="Değer", color="Taraf", title=f"📅 {kalem_sec} Trendi",
-                      markers=True,
-                      color_discrete_sequence=["#FCB131", "#000000", "#555555"])
-
+        df_chart = df[df["Kalem"] == kalem_sec].copy().sort_values("TarihObj")
+        fig = px.line(df_chart, x="Dönem", y="Değer", color="Taraf", title=f"📅 {kalem_sec} Gelişimi", markers=True,
+                      color_discrete_sequence=px.colors.qualitative.Bold)
         fig.update_xaxes(categoryorder='array', categoryarray=df_chart["Dönem"].unique())
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", hovermode="x unified")
         fig.update_yaxes(tickformat=",")
+        fig.update_layout(hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True, key="trend_chart")
 
+    # 2. SEKME: YARIŞ PİSTİ (SHOW)
     with tab2:
-        st.markdown("#### 🧪 What-If (Senaryo) Analizi")
-        st.info("Seçtiğiniz tarafın verilerini sanal olarak artırıp azaltarak sonucu simüle edin.")
+        st.markdown("#### 🏁 Verilerin Zamanla Yarışı (Animasyon)")
+        st.info("Aşağıdaki 'Play' tuşuna basarak değişimi zaman içinde izleyin.")
+        kalem_race = st.selectbox("Yarışacak Veri:", df["Kalem"].unique(), key="race_select")
+        df_race = df[df["Kalem"] == kalem_race].copy().sort_values("TarihObj")
+
+        # Animasyonun düzgün çalışması için frame'leri sıralı veriyoruz
+        fig_race = px.bar(df_race, x="Taraf", y="Değer", color="Taraf",
+                          animation_frame="Dönem", animation_group="Taraf",
+                          range_y=[0, df_race["Değer"].max() * 1.2],
+                          title=f"🏆 {kalem_race} - Zaman İçindeki Değişim",
+                          color_discrete_sequence=px.colors.qualitative.Bold)
+        fig_race.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = 800  # Hız ayarı
+        st.plotly_chart(fig_race, use_container_width=True, key="race_chart")
+
+    # 3. SEKME: SENARYO
+    with tab3:
+        st.markdown("#### 🧪 What-If Analizi")
         c_sim1, c_sim2 = st.columns([1, 2])
         with c_sim1:
-            taraf_sim = st.selectbox("Simüle Edilecek Taraf:", df["Taraf"].unique(), key="sim_taraf")
-            kalem_sim = st.selectbox("Simüle Edilecek Kalem:", df["Kalem"].unique(), key="sim_kalem")
-            artis_orani = st.slider("Değişim Oranı (%)", min_value=-50, max_value=50, value=10, step=5,
-                                    key="sim_slider")
+            taraf_sim = st.selectbox("Taraf:", df["Taraf"].unique(), key="sim_taraf")
+            kalem_sim = st.selectbox("Kalem:", df["Kalem"].unique(), key="sim_kalem")
+            artis_orani = st.slider("Değişim (%)", -50, 50, 10, 5, key="sim_slider")
         with c_sim2:
             base_row = df[
                 (df["Taraf"] == taraf_sim) & (df["Kalem"] == kalem_sim) & (df["TarihObj"] == df["TarihObj"].max())]
             if not base_row.empty:
-                mevcut_deger = base_row.iloc[0]["Değer"]
-                yeni_deger = mevcut_deger * (1 + artis_orani / 100)
-                fark = yeni_deger - mevcut_deger
-                col_a, col_b = st.columns(2)
-                with col_a: st.metric("Mevcut Durum", f"{mevcut_deger:,.0f}".replace(",", "."))
-                with col_b: st.metric(f"Senaryo (%{artis_orani})", f"{yeni_deger:,.0f}".replace(",", "."),
-                                      delta=f"{fark:,.0f}".replace(",", "."))
-                sim_data = pd.DataFrame({"Durum": ["Mevcut", "Simülasyon"], "Tutar": [mevcut_deger, yeni_deger]})
-                fig_sim = px.bar(sim_data, x="Durum", y="Tutar", color="Durum", text_auto='.2s',
-                                 color_discrete_map={"Mevcut": "#000000", "Simülasyon": "#FCB131"})
-                fig_sim.update_layout(height=300, showlegend=False)
-                st.plotly_chart(fig_sim, use_container_width=True, key="sim_chart")
+                mevcut = base_row.iloc[0]["Değer"]
+                yeni = mevcut * (1 + artis_orani / 100)
+                fark = yeni - mevcut
 
-    with tab3:
-        st.markdown("#### 📑 Ham Veri Tablosu")
-        # Kalemi geri getirdik ve sıraya soktuk: Tarih -> Kalem -> Taraf
-        df_display = df.sort_values(["TarihObj", "Kalem", "Taraf"])
+                # Görsel Kartlar
+                c_k1, c_k2, c_k3 = st.columns(3)
+                c_k1.metric("Mevcut", f"{mevcut:,.0f}")
+                c_k2.metric("Senaryo", f"{yeni:,.0f}", f"{fark:,.0f}")
 
-        # Gösterilecek sütunları seç (TarihObj'yi at, Kalem'i tut)
-        df_display = df_display[["Dönem", "Kalem", "Taraf", "Değer"]]
+                # Basit Bar
+                sim_df = pd.DataFrame({"Durum": ["Mevcut", "Senaryo"], "Değer": [mevcut, yeni]})
+                fig_sim = px.bar(sim_df, x="Durum", y="Değer", color="Durum", text_auto='.2s',
+                                 color_discrete_map={"Mevcut": "gray", "Senaryo": "orange"})
+                fig_sim.update_layout(height=250, showlegend=False)
+                st.plotly_chart(fig_sim, use_container_width=True)
 
-        # Ekran için formatlama (Noktalı)
-        df_formatted_display = df_display.copy()
-        df_formatted_display["Değer"] = df_formatted_display["Değer"].apply(
-            lambda x: "{:,.0f}".format(x).replace(",", "."))
-
-        st.dataframe(df_formatted_display, use_container_width=True)
-
-        # --- EXCEL ÇIKTISI ---
-        df_for_excel = df.copy().sort_values(["TarihObj", "Kalem", "Taraf"])
-        df_for_excel["Değer"] = df_for_excel["Değer"].apply(lambda x: "{:,.0f}".format(x).replace(",", "."))
+    # 4. SEKME: TABLO & EXCEL
+    with tab4:
+        st.markdown("#### 📑 Ham Veri")
+        df_display = df.sort_values(["TarihObj", "Kalem", "Taraf"])[["Dönem", "Kalem", "Taraf", "Değer"]]
+        df_display_fmt = df_display.copy()
+        df_display_fmt["Değer"] = df_display_fmt["Değer"].apply(lambda x: "{:,.0f}".format(x).replace(",", "."))
+        st.dataframe(df_display_fmt, use_container_width=True)
 
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer) as writer:
-            unique_kalemler = df_for_excel["Kalem"].unique()
-            for kalem_adi in unique_kalemler:
-                sub_df = df_for_excel[df_for_excel["Kalem"] == kalem_adi].copy()
-                # Sayfa adı zaten kalem adı, bu yüzden Excel içinden çıkarıyoruz
-                sub_df = sub_df.drop(columns=["Kalem", "TarihObj"])
+            for kalem in df["Kalem"].unique():
+                sub = df[df["Kalem"] == kalem].copy().sort_values(["TarihObj", "Taraf"]).drop(
+                    columns=["Kalem", "TarihObj"])
+                sub.to_excel(writer, index=False, sheet_name=kalem[:30].replace("/", "-"))
 
-                sheet_name = kalem_adi[:30].replace("/", "-").replace("\\", "-")
-                sub_df.to_excel(writer, index=False, sheet_name=sheet_name)
+        st.download_button("💾 Excel İndir", buffer.getvalue(), "bddk_analiz.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_btn")
 
-        st.download_button(
-            label="💾 Excel İndir",
-            data=buffer.getvalue(),
-            file_name="bddk_analiz.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="btn_excel"
-        )
+    # 5. SEKME: AKILLI ANALİZ BOTU 2.0 (ŞOV KISMI)
+    with tab5:
+        st.markdown("#### 🧠 Akıllı Analiz Botu 2.0")
+        st.info("Verileri istatistiksel olarak inceler, riskleri ve fırsatları matematiksel olarak bulur.")
 
-    with tab4:
-        st.markdown("#### 🤖 Hazır Analiz Botu")
-        st.info("Aşağıdan bir veri kalemi seçin, sistem size otomatik bir durum raporu oluştursun.")
+        bot_kalem = st.selectbox("Analiz Edilecek Veri:", df["Kalem"].unique(), key="bot_select")
+        bot_taraf = st.selectbox("Odaklanılacak Taraf:", df["Taraf"].unique(), key="bot_taraf_select")
 
-        analiz_kalem = st.selectbox("Analiz Edilecek Kalem:", df["Kalem"].unique(), key="bot_select")
+        if st.button("Analizi Çalıştır", key="run_bot"):
+            with st.spinner("Bot verileri tarıyor, istatistikleri hesaplıyor..."):
+                time.sleep(1)  # Şov efekti
 
-        if st.button("Raporu Oluştur", key="btn_bot"):
-            # Veriyi Hazırla
-            df_analiz = df[df["Kalem"] == analiz_kalem].sort_values("TarihObj")
-            son_tarih = df_analiz["TarihObj"].max()
-            onceki_tarih = df_analiz["TarihObj"].unique()[-2] if len(df_analiz["TarihObj"].unique()) > 1 else None
+                # Veri Hazırlığı
+                df_bot = df[(df["Kalem"] == bot_kalem) & (df["Taraf"] == bot_taraf)].sort_values("TarihObj")
 
-            st.markdown(f"### 📋 {analiz_kalem} - Durum Raporu")
+                if not df_bot.empty:
+                    son_deger = df_bot.iloc[-1]["Değer"]
+                    ilk_deger = df_bot.iloc[0]["Değer"]
+                    ortalama = df_bot["Değer"].mean()
+                    std_sapma = df_bot["Değer"].std()
 
-            # 1. Genel Sektör Yorumu
-            sektor_row = df_analiz[(df_analiz["Taraf"] == "Sektör") & (df_analiz["TarihObj"] == son_tarih)]
-            if not sektor_row.empty:
-                sektor_val = sektor_row.iloc[0]["Değer"]
+                    # 1. BÜYÜME KARTI
+                    toplam_buyume = ((son_deger - ilk_deger) / ilk_deger) * 100
+                    trend_icon = "🚀" if toplam_buyume > 0 else "📉"
 
-                # Büyüme Hesapla
-                if onceki_tarih:
-                    prev_row = df_analiz[(df_analiz["Taraf"] == "Sektör") & (df_analiz["TarihObj"] == onceki_tarih)]
-                    if not prev_row.empty:
-                        prev_val = prev_row.iloc[0]["Değer"]
-                        degisim = ((sektor_val - prev_val) / prev_val) * 100
-                        trend_emoji = "📈" if degisim > 0 else "📉"
-                        yorum = "artış" if degisim > 0 else "azalış"
+                    st.markdown(f"""
+                    <div class="bot-card">
+                        <div class="bot-title">📊 Genel Trend Analizi</div>
+                        <div class="bot-value">{trend_icon} %{toplam_buyume:.1f} Değişim</div>
+                        <p>Seçilen dönem aralığında <b>{bot_taraf}</b> tarafında <b>{bot_kalem}</b> verisi {ilk_deger:,.0f} seviyesinden {son_deger:,.0f} seviyesine gelmiştir.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
+                    c_bot1, c_bot2 = st.columns(2)
+
+                    # 2. RİSK / VOLATİLİTE ANALİZİ (Z-Score)
+                    with c_bot1:
+                        st.markdown("##### ⚠️ Risk ve Stabilite")
+                        # Varyasyon katsayısı (CV) = Std Sapma / Ortalama
+                        cv = (std_sapma / ortalama) * 100 if ortalama != 0 else 0
+
+                        risk_renk = "green"
+                        risk_yorum = "Düşük (Stabil)"
+                        if cv > 20:
+                            risk_renk = "red"
+                            risk_yorum = "Yüksek (Dalgalı)"
+                        elif cv > 10:
+                            risk_renk = "orange"
+                            risk_yorum = "Orta (Normal)"
+
+                        fig_gauge = go.Figure(go.Indicator(
+                            mode="gauge+number",
+                            value=cv,
+                            title={'text': "Volatilite (Risk) Skoru"},
+                            gauge={'axis': {'range': [0, 50]},
+                                   'bar': {'color': risk_renk},
+                                   'steps': [
+                                       {'range': [0, 10], 'color': "#e6fffa"},
+                                       {'range': [10, 20], 'color': "#fffaf0"},
+                                       {'range': [20, 50], 'color': "#fff5f5"}],
+                                   'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75,
+                                                 'value': 40}}))
+                        fig_gauge.update_layout(height=250, margin=dict(l=20, r=20, t=40, b=20))
+                        st.plotly_chart(fig_gauge, use_container_width=True)
+                        st.caption(f"Veri hareketliliği (CV): %{cv:.1f} - Durum: **{risk_yorum}**")
+
+                    # 3. GELECEK TAHMİNİ (Basit Projeksiyon)
+                    with c_bot2:
+                        st.markdown("##### 🔮 Gelecek Ay Tahmini")
+                        # Ortalama aylık büyüme hızını bul
+                        df_bot["degisim"] = df_bot["Değer"].pct_change()
+                        avg_growth = df_bot["degisim"].mean()
+
+                        gelecek_tahmin = son_deger * (1 + avg_growth)
+                        fark_tahmin = gelecek_tahmin - son_deger
+
+                        st.metric(label="Önümüzdeki Ay Beklentisi",
+                                  value=f"{gelecek_tahmin:,.0f}",
+                                  delta=f"{fark_tahmin:,.0f} (Tahmini Artış)")
+
+                        st.markdown(f"""
+                        <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; font-size:12px;">
+                        ℹ️ <b>Not:</b> Bu tahmin, geçmiş dönemlerin ortalama büyüme hızı (%{avg_growth * 100:.2f}) baz alınarak hesaplanmıştır. Kesinlik içermez.
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # 4. ANOMALİ KONTROLÜ
+                    z_score = (son_deger - ortalama) / std_sapma if std_sapma != 0 else 0
+                    if abs(z_score) > 2:
+                        st.warning(
+                            f"🚨 **DİKKAT:** Son ay verisi istatistiksel olarak normalden çok sapmış (Z-Skor: {z_score:.2f}). Olağandışı bir hareket var!")
+                    else:
                         st.success(
-                            f"**Genel Trend:** Sektör genelinde **{analiz_kalem}** kalemi son ayda **%{degisim:.2f}** oranında {yorum} gösterdi. {trend_emoji}")
-
-            # 2. Karşılaştırmalı Analiz
-            st.markdown("**🔍 Detaylı Kırılımlar:**")
-            tum_taraflar = df_analiz[df_analiz["TarihObj"] == son_tarih]
-            tum_taraflar = tum_taraflar[tum_taraflar["Taraf"] != "Sektör"].sort_values("Değer", ascending=False)
-
-            if not tum_taraflar.empty:
-                lider = tum_taraflar.iloc[0]
-                st.markdown(f"- En büyük paya sahip grup: **{lider['Taraf']}** ({lider['Değer']:,.0f} TL)")
-
-                # Büyüme Karşılaştırması
-                if onceki_tarih:
-                    buyume_listesi = []
-                    for t in tum_taraflar["Taraf"].unique():
-                        t_now = \
-                        df_analiz[(df_analiz["Taraf"] == t) & (df_analiz["TarihObj"] == son_tarih)]["Değer"].values[0]
-                        t_prev_rows = df_analiz[(df_analiz["Taraf"] == t) & (df_analiz["TarihObj"] == onceki_tarih)]
-                        if not t_prev_rows.empty:
-                            t_prev = t_prev_rows["Değer"].values[0]
-                            pct = ((t_now - t_prev) / t_prev) * 100
-                            buyume_listesi.append((t, pct))
-
-                    if buyume_listesi:
-                        en_hizli = max(buyume_listesi, key=lambda item: item[1])
-                        st.markdown(f"- En hızlı büyüyen grup: **{en_hizli[0]}** (%{en_hizli[1]:.2f} artış ile).")
+                            f"✅ **DURUM NORMAL:** Son veri istatistiksel standartlar içinde (Z-Skor: {z_score:.2f}). Anormal bir sıçrama yok.")
