@@ -51,6 +51,7 @@ st.markdown("""
         font-size: 18px !important;
         transition: all 0.3s ease;
     }
+    /* Streamlit buton içindeki yazı bazen p etiketiyle gelir, onu da beyaz yapalım */
     div.stButton > button p { color: #FFFFFF !important; }
 
     div.stButton > button:hover { 
@@ -118,7 +119,7 @@ def get_driver():
         return webdriver.Chrome(service=service, options=options)
 
 
-# --- 4. VERİ ÇEKME MOTORU ---
+# --- 4. VERİ ÇEKME MOTORU (YENİLENMİŞ) ---
 def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
     driver = None
     data = []
@@ -126,11 +127,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
     try:
         driver = get_driver()
         driver.set_page_load_timeout(60)
-        status_container.info("🌐 BDDK sistemine bağlanılıyor...")
-        driver.get("https://www.bddk.org.tr/bultenaylik")
-
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
-        time.sleep(3)
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
@@ -145,17 +141,26 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
             for ay_i in range(s_m, e_m + 1):
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
-                status_container.info(f"⏳ İşleniyor: **{donem}**")
+                status_container.info(f"⏳ İşleniyor: **{donem}** (Sayfa Yenileniyor...)")
+
+                # --- KRİTİK DÜZELTME: HER AY SAYFAYI YENİLE ---
+                # Bu işlem "Stale Element" hatasını ve verinin takılı kalmasını %100 önler.
+                driver.get("https://www.bddk.org.tr/bultenaylik")
+                WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "ddlYil")))
+                time.sleep(2)  # Sayfanın kendine gelmesi için
 
                 try:
+                    # 1. YIL SEÇİMİ
                     driver.execute_script("document.getElementById('ddlYil').style.display = 'block';")
                     Select(driver.find_element(By.ID, "ddlYil")).select_by_visible_text(str(yil))
                     time.sleep(2)
 
+                    # 2. AY SEÇİMİ
                     driver.execute_script("document.getElementById('ddlAy').style.display = 'block';")
                     Select(driver.find_element(By.ID, "ddlAy")).select_by_visible_text(ay_str)
-                    time.sleep(4)
+                    time.sleep(3)
 
+                    # 3. TARAF DÖNGÜSÜ
                     for taraf in secilen_taraflar:
                         driver.execute_script("document.getElementById('ddlTaraf').style.display = 'block';")
                         select_taraf = Select(driver.find_element(By.ID, "ddlTaraf"))
@@ -167,15 +172,17 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                 if taraf in opt.text:
                                     select_taraf.select_by_visible_text(opt.text)
                                     break
-                        time.sleep(3)
 
+                        time.sleep(2.5)  # Tablo güncellemesi için bekle
+
+                        # HTML ÇEK
                         soup = BeautifulSoup(driver.page_source, 'html.parser')
 
                         for veri in secilen_veriler:
                             conf = VERI_KONFIGURASYONU[veri]
                             try:
                                 driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                                time.sleep(1.5)
+                                time.sleep(1)
                                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                             except:
                                 pass
@@ -199,12 +206,14 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                                     if found_val is not None:
                                         data.append({
                                             "Dönem": donem, "Taraf": taraf, "Kalem": veri, "Değer": found_val,
-                                            # SIRALAMA İÇİN KRİTİK ALAN: Tarih Objesi
+                                            # SIRALAMA İÇİN TARİH OBJESİ
                                             "TarihObj": pd.to_datetime(f"{yil}-{ay_i + 1}-01")
                                         })
                                     break
 
                 except Exception as step_e:
+                    # Bu adımda hata olsa bile diğer aya geç
+                    print(f"Adım hatası: {step_e}")
                     pass
 
                 current_step += 1
@@ -257,7 +266,6 @@ if btn:
 # --- DASHBOARD ---
 if st.session_state['df_sonuc'] is not None:
     df = st.session_state['df_sonuc']
-    # KRİTİK: Veriyi önce tarihe göre sıralıyoruz
     df = df.sort_values("TarihObj")
 
     # 1. KPI KARTLARI
@@ -289,21 +297,18 @@ if st.session_state['df_sonuc'] is not None:
     # 2. SEKMELER
     tab1, tab2, tab3, tab4 = st.tabs(["📉 Trend Analizi", "🧪 Senaryo Simülasyonu", "📊 Pazar Payı", "📑 Detaylı Tablo"])
 
-    # TAB 1: TREND ANALİZİ (DÜZELTİLDİ: TÜRKÇE TARİH SORUNU YOK)
+    # TAB 1: TREND ANALİZİ
     with tab1:
         kalem_sec = st.selectbox("Grafik Kalemi:", df["Kalem"].unique())
         df_chart = df[df["Kalem"] == kalem_sec].copy()
         df_chart["Değer"] = df_chart["Değer"].astype(float)
 
-        # SIRALAMA MANTIĞI: String'i (Ocak) parse etmeye çalışma!
-        # Zaten 'df' yukarıda 'TarihObj'ye göre sıralandı.
-        # Sıralı haldeki benzersiz 'Dönem' isimlerini liste olarak alıyoruz.
-        sirali_donemler = df_chart["Dönem"].unique()
+        # Sıralama mantığı: TarihObj kullanıyoruz, string sıralaması yapmıyoruz
+        sirali_donemler = df_chart.sort_values("TarihObj")["Dönem"].unique()
 
         fig = px.line(df_chart, x="Dönem", y="Değer", color="Taraf",
                       title=f"📅 {kalem_sec} Trendi",
                       markers=True,
-                      # Plotly'e sıralamayı elle veriyoruz
                       category_orders={"Dönem": sirali_donemler},
                       color_discrete_sequence=["#FCB131", "#000000", "#555555"])
 
@@ -374,7 +379,6 @@ if st.session_state['df_sonuc'] is not None:
     # TAB 4: TABLO
     with tab4:
         pivot_df = df.pivot_table(index="Dönem", columns=["Kalem", "Taraf"], values="Değer", aggfunc="sum")
-        # FORMATLAMA: 1.250.000 ŞEKLİNDE (NOKTA AYRAÇLI)
         display_df = pivot_df.applymap(lambda x: f"{x:,.0f}".replace(",", ".") if pd.notnull(x) else "-")
 
         st.dataframe(display_df, use_container_width=True, height=400)
